@@ -5,7 +5,7 @@ import { IUser } from '../types';
 // Agent Personality Configuration
 const AgentPersonalitySchema = new Schema({
   traits: [{ type: String, enum: ['professional', 'friendly', 'concise', 'detailed', 'encouraging', 'analytical'] }],
-  communicationStyle: { type: String, enum: ['casual', 'formal'], default: 'casual' },
+  communicationStyle: { type: String, enum: ['casual', 'formal', 'professional'], default: 'casual' },
   responseStyle: { type: String, enum: ['brief', 'detailed', 'balanced'], default: 'balanced' },
 }, { _id: false });
 

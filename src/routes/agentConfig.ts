@@ -197,11 +197,21 @@ router.put('/task-categories', authenticateToken, async (req: any, res) => {
       const invalidCategories = enabledCategories.filter((cat: string) => !validCategories.includes(cat));
 
       if (invalidCategories.length > 0) {
+        console.error('Invalid task categories received:', invalidCategories);
         return res.status(400).json({
           success: false,
           error: `Invalid task categories: ${invalidCategories.join(', ')}`,
         } as ApiResponse<null>);
       }
+    }
+
+    // If neither field is provided, return error
+    if (!enabledCategories && !priorityOrder) {
+      console.error('No task categories or priority order provided in request body:', req.body);
+      return res.status(400).json({
+        success: false,
+        error: 'Either enabledCategories or priorityOrder must be provided',
+      } as ApiResponse<null>);
     }
 
     const updateData: any = {};

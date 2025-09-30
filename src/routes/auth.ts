@@ -126,13 +126,19 @@ router.post('/register-enhanced', async (req, res) => {
       passwordLength: password?.length
     });
 
-    // Validate required fields
-    if (!userDetails?.fullName || !userDetails?.preferredName || !email || !phone || !assistantName) {
+    // Validate required fields - use defaults for missing userDetails
+    if (!email || !phone) {
       return res.status(400).json({
         success: false,
-        error: 'Full name, preferred name, email, phone, and assistant name are required',
+        error: 'Email and phone are required',
       } as ApiResponse<null>);
     }
+
+    // Use defaults if userDetails are missing
+    const fullName = userDetails?.fullName?.trim() || 'User';
+    const preferredName = userDetails?.preferredName?.trim() || fullName;
+    const title = userDetails?.title?.trim() || '';
+    const finalAssistantName = assistantName?.trim() || 'Assistant';
 
     // Check if user already exists with this email
     const existingEmailUser = await User.findOne({ email: email.toLowerCase() });
@@ -167,14 +173,14 @@ router.post('/register-enhanced', async (req, res) => {
 
     // Create user with enhanced details
     const user = await User.create({
-      fullName: userDetails.fullName.trim(),
-      preferredName: userDetails.preferredName.trim(),
-      title: userDetails.title?.trim() || '',
-      name: userDetails.preferredName.trim(), // Legacy field for backward compatibility
+      fullName: fullName,
+      preferredName: preferredName,
+      title: title,
+      name: preferredName, // Legacy field for backward compatibility
       email: email.toLowerCase(),
       password: hashedPassword,
       phone: phone.trim(),
-      assistantName: assistantName.trim(),
+      assistantName: finalAssistantName,
       preferences: {
         voiceEnabled: true,
         reminderStyle: 'friendly',
@@ -480,6 +486,7 @@ router.post('/verify-otp', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    // Get stored OTP
     const storedOtp = otpStore.get(identifier);
 
     if (!storedOtp) {
