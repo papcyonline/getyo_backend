@@ -39,7 +39,9 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:8081'],
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.CORS_ORIGINS?.split(',') || '*')
+    : (process.env.CORS_ORIGINS?.split(',') || ['http://localhost:8081']),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -116,7 +118,7 @@ app.use((req, res) => {
 });
 
 // Server startup
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   try {
@@ -132,13 +134,18 @@ async function startServer() {
     console.log('Initializing legal content...');
     await LegalService.initializeDefaultContent();
 
-    // Start the server
-    server.listen(PORT, () => {
+    // Start the server on all network interfaces (0.0.0.0)
+    server.listen({
+      port: PORT,
+      host: '0.0.0.0'
+    }, () => {
       console.log(`
 🚀 Yo! Personal Assistant API Server Started
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📡 Server running on: http://localhost:${PORT}
+📡 Server running on: http://0.0.0.0:${PORT}
+🌐 Local: http://localhost:${PORT}
+📱 Network: http://192.168.1.231:${PORT}
 🌍 Environment: ${process.env.NODE_ENV || 'development'}
 💾 Database: ${DatabaseConnection.getConnectionStatus() ? '✅ Connected' : '❌ Disconnected'}
 ⚡ WebSocket: ✅ Active
