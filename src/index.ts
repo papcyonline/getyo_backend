@@ -8,6 +8,11 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
+console.log('Starting Yo! Backend Server...');
+console.log('Node version:', process.version);
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Port:', process.env.PORT);
+
 // Import services and utilities
 import DatabaseConnection from './utils/database';
 import SocketService from './services/SocketService';
