@@ -32,11 +32,11 @@ const OTPSchema = new Schema<IOTP>({
     type: Date,
     required: true,
     index: true,
+    expires: 0, // TTL index - delete when expiresAt is reached
   },
   createdAt: {
     type: Date,
     default: Date.now,
-    expires: 600, // Auto-delete after 10 minutes (TTL index)
   },
 });
 
