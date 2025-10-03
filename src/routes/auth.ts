@@ -598,11 +598,15 @@ router.post('/send-email-otp', async (req, res) => {
       attempts: 0
     });
 
+    console.log(`📧 OTP generated for ${email}: ${otpCode} (expires: ${new Date(Date.now() + 10 * 60 * 1000).toISOString()})`);
+
     // Send email using Resend service
     const emailSent = await emailService.sendOTPEmail(email, otpCode);
 
     if (!emailSent) {
       console.warn(`Failed to send email to ${email}, but OTP stored for development`);
+    } else {
+      console.log(`✅ OTP email sent successfully to ${email}`);
     }
 
     res.json({
@@ -634,15 +638,22 @@ router.post('/verify-otp', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    console.log(`🔍 Verifying OTP for ${identifier}, type: ${type}`);
+    console.log(`📋 Current OTP store has ${otpStore.size} entries`);
+
     // Get stored OTP
     const storedOtp = otpStore.get(identifier);
 
     if (!storedOtp) {
+      console.log(`❌ OTP not found for ${identifier}`);
+      console.log(`📋 Available identifiers in store: ${Array.from(otpStore.keys()).join(', ')}`);
       return res.status(400).json({
         success: false,
         error: 'OTP not found or expired'
       } as ApiResponse<null>);
     }
+
+    console.log(`✅ Found OTP for ${identifier}. Code: ${storedOtp.code}, Expires: ${storedOtp.expires}, Attempts: ${storedOtp.attempts}`);
 
     // Check if OTP is expired
     if (new Date() > storedOtp.expires) {
