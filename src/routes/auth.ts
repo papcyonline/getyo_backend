@@ -2,13 +2,11 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models';
+import OTP from '../models/OTP';
 import { ApiResponse, AuthPayload, RegistrationRequest, UserDetailsData } from '../types';
 import { authenticateToken } from '../middleware/auth';
 import smsService from '../services/smsService';
 import emailService from '../services/emailService';
-
-// Simple in-memory OTP storage (replace with Redis in production)
-const otpStore = new Map<string, { code: string; expires: Date; attempts: number }>();
 
 const router = express.Router();
 
@@ -545,10 +543,15 @@ router.post('/send-phone-otp', async (req, res) => {
     // Generate 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP with 10-minute expiry
-    otpStore.set(phone, {
+    // Delete any existing OTP for this phone
+    await OTP.deleteMany({ identifier: phone, type: 'phone' });
+
+    // Store OTP in MongoDB with 10-minute expiry
+    await OTP.create({
+      identifier: phone,
       code: otpCode,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+      type: 'phone',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       attempts: 0
     });
 
@@ -591,10 +594,15 @@ router.post('/send-email-otp', async (req, res) => {
     // Generate 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store OTP with 10-minute expiry
-    otpStore.set(email, {
+    // Delete any existing OTP for this email
+    await OTP.deleteMany({ identifier: email, type: 'email' });
+
+    // Store OTP in MongoDB with 10-minute expiry
+    await OTP.create({
+      identifier: email,
       code: otpCode,
-      expires: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+      type: 'email',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       attempts: 0
     });
 
@@ -639,25 +647,25 @@ router.post('/verify-otp', async (req, res) => {
     }
 
     console.log(`🔍 Verifying OTP for ${identifier}, type: ${type}`);
-    console.log(`📋 Current OTP store has ${otpStore.size} entries`);
 
-    // Get stored OTP
-    const storedOtp = otpStore.get(identifier);
+    // Get stored OTP from MongoDB
+    const storedOtp = await OTP.findOne({ identifier, type });
 
     if (!storedOtp) {
       console.log(`❌ OTP not found for ${identifier}`);
-      console.log(`📋 Available identifiers in store: ${Array.from(otpStore.keys()).join(', ')}`);
+      const otpCount = await OTP.countDocuments();
+      console.log(`📋 Total OTPs in database: ${otpCount}`);
       return res.status(400).json({
         success: false,
         error: 'OTP not found or expired'
       } as ApiResponse<null>);
     }
 
-    console.log(`✅ Found OTP for ${identifier}. Code: ${storedOtp.code}, Expires: ${storedOtp.expires}, Attempts: ${storedOtp.attempts}`);
+    console.log(`✅ Found OTP for ${identifier}. Code: ${storedOtp.code}, Expires: ${storedOtp.expiresAt}, Attempts: ${storedOtp.attempts}`);
 
     // Check if OTP is expired
-    if (new Date() > storedOtp.expires) {
-      otpStore.delete(identifier);
+    if (new Date() > storedOtp.expiresAt) {
+      await OTP.deleteOne({ _id: storedOtp._id });
       return res.status(400).json({
         success: false,
         error: 'OTP expired'
@@ -666,7 +674,7 @@ router.post('/verify-otp', async (req, res) => {
 
     // Check attempts
     if (storedOtp.attempts >= 3) {
-      otpStore.delete(identifier);
+      await OTP.deleteOne({ _id: storedOtp._id });
       return res.status(400).json({
         success: false,
         error: 'Too many failed attempts'
@@ -676,7 +684,7 @@ router.post('/verify-otp', async (req, res) => {
     // Verify OTP
     if (storedOtp.code !== otp) {
       storedOtp.attempts++;
-      otpStore.set(identifier, storedOtp);
+      await storedOtp.save();
       return res.status(400).json({
         success: false,
         error: 'Invalid OTP'
@@ -684,7 +692,7 @@ router.post('/verify-otp', async (req, res) => {
     }
 
     // OTP verified successfully
-    otpStore.delete(identifier);
+    await OTP.deleteOne({ _id: storedOtp._id });
 
     res.json({
       success: true,
@@ -864,11 +872,15 @@ router.post('/forgot-password', async (req, res) => {
     // Generate 6-digit reset code
     const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Store reset code with 15-minute expiry
-    const resetKey = `reset_${email}`;
-    otpStore.set(resetKey, {
+    // Delete any existing reset code for this email
+    await OTP.deleteMany({ identifier: email, type: 'reset' });
+
+    // Store reset code in MongoDB with 15-minute expiry
+    await OTP.create({
+      identifier: email,
       code: resetCode,
-      expires: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
+      type: 'reset',
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
       attempts: 0
     });
 
@@ -915,8 +927,8 @@ router.post('/reset-password', async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    const resetKey = `reset_${email}`;
-    const storedReset = otpStore.get(resetKey);
+    // Get stored reset code from MongoDB
+    const storedReset = await OTP.findOne({ identifier: email, type: 'reset' });
 
     if (!storedReset) {
       return res.status(400).json({
@@ -926,8 +938,8 @@ router.post('/reset-password', async (req, res) => {
     }
 
     // Check if reset code is expired
-    if (new Date() > storedReset.expires) {
-      otpStore.delete(resetKey);
+    if (new Date() > storedReset.expiresAt) {
+      await OTP.deleteOne({ _id: storedReset._id });
       return res.status(400).json({
         success: false,
         error: 'Reset code expired',
@@ -936,7 +948,7 @@ router.post('/reset-password', async (req, res) => {
 
     // Check attempts
     if (storedReset.attempts >= 3) {
-      otpStore.delete(resetKey);
+      await OTP.deleteOne({ _id: storedReset._id });
       return res.status(400).json({
         success: false,
         error: 'Too many failed attempts',
@@ -946,7 +958,7 @@ router.post('/reset-password', async (req, res) => {
     // Verify reset code
     if (storedReset.code !== code) {
       storedReset.attempts++;
-      otpStore.set(resetKey, storedReset);
+      await storedReset.save();
       return res.status(400).json({
         success: false,
         error: 'Invalid reset code',
@@ -956,7 +968,7 @@ router.post('/reset-password', async (req, res) => {
     // Find user and update password
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      otpStore.delete(resetKey);
+      await OTP.deleteOne({ _id: storedReset._id });
       return res.status(404).json({
         success: false,
         error: 'User not found',
@@ -972,7 +984,7 @@ router.post('/reset-password', async (req, res) => {
     });
 
     // Clean up reset code
-    otpStore.delete(resetKey);
+    await OTP.deleteOne({ _id: storedReset._id });
 
     res.json({
       success: true,
