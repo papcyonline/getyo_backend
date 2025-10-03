@@ -127,10 +127,10 @@ router.post('/register-enhanced', async (req, res) => {
     });
 
     // Validate required fields - use defaults for missing userDetails
-    if (!email || !phone) {
+    if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Email and phone are required',
+        error: 'Email is required',
       } as ApiResponse<null>);
     }
 
@@ -149,13 +149,15 @@ router.post('/register-enhanced', async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    // Check if user already exists with this phone number
-    const existingPhoneUser = await User.findOne({ phone: phone.trim() });
-    if (existingPhoneUser) {
-      return res.status(400).json({
-        success: false,
-        error: 'An account with this phone number already exists',
-      } as ApiResponse<null>);
+    // Check if user already exists with this phone number (only if phone is provided)
+    if (phone && phone.trim()) {
+      const existingPhoneUser = await User.findOne({ phone: phone.trim() });
+      if (existingPhoneUser) {
+        return res.status(400).json({
+          success: false,
+          error: 'An account with this phone number already exists',
+        } as ApiResponse<null>);
+      }
     }
 
     // Generate a temporary password if none provided (user can set it later)
@@ -179,7 +181,7 @@ router.post('/register-enhanced', async (req, res) => {
       name: preferredName, // Legacy field for backward compatibility
       email: email.toLowerCase(),
       password: hashedPassword,
-      phone: phone.trim(),
+      phone: phone ? phone.trim() : undefined,
       assistantName: finalAssistantName,
       preferences: {
         voiceEnabled: true,
@@ -223,6 +225,143 @@ router.post('/register-enhanced', async (req, res) => {
     } as ApiResponse<{ user: any; token: string; passwordGenerated: boolean }>);
   } catch (error) {
     console.error('Enhanced registration error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/oauth/google
+// @desc    Google OAuth login/register
+// @access  Public
+router.post('/oauth/google', async (req, res) => {
+  try {
+    const { idToken, email, name } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and name are required from Google',
+      } as ApiResponse<null>);
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // Create new user with Google OAuth
+      user = await User.create({
+        name,
+        email: email.toLowerCase(),
+        password: Math.random().toString(36).slice(-12), // Random password for OAuth users
+        preferences: {
+          voiceEnabled: true,
+          reminderStyle: 'friendly',
+          dailyBriefingTime: '08:00',
+          theme: 'dark',
+          wakeWord: 'Hey Yo',
+          conversationStyle: 'casual',
+          language: 'en',
+        },
+        integrations: {},
+      });
+    }
+
+    // Generate token
+    const token = generateToken(user._id.toString(), user.email);
+
+    const userResponse = {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      assistantName: user.assistantName,
+      preferences: user.preferences,
+      integrations: user.integrations,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        user: userResponse,
+        token,
+      },
+      message: 'Google authentication successful',
+    } as ApiResponse<{ user: any; token: string }>);
+  } catch (error) {
+    console.error('Google OAuth error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/oauth/apple
+// @desc    Apple OAuth login/register
+// @access  Public
+router.post('/oauth/apple', async (req, res) => {
+  try {
+    const { identityToken, email, fullName } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required from Apple',
+      } as ApiResponse<null>);
+    }
+
+    // Check if user exists
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // Create new user with Apple OAuth
+      const name = fullName || email.split('@')[0];
+      user = await User.create({
+        name,
+        email: email.toLowerCase(),
+        password: Math.random().toString(36).slice(-12), // Random password for OAuth users
+        preferences: {
+          voiceEnabled: true,
+          reminderStyle: 'friendly',
+          dailyBriefingTime: '08:00',
+          theme: 'dark',
+          wakeWord: 'Hey Yo',
+          conversationStyle: 'casual',
+          language: 'en',
+        },
+        integrations: {},
+      });
+    }
+
+    // Generate token
+    const token = generateToken(user._id.toString(), user.email);
+
+    const userResponse = {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      assistantName: user.assistantName,
+      preferences: user.preferences,
+      integrations: user.integrations,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        user: userResponse,
+        token,
+      },
+      message: 'Apple authentication successful',
+    } as ApiResponse<{ user: any; token: string }>);
+  } catch (error) {
+    console.error('Apple OAuth error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
