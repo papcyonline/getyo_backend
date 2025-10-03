@@ -39,6 +39,7 @@ router.post('/register', async (req, res) => {
 
     // Check if user already exists with this email
     const existingEmailUser = await User.findOne({ email: email.toLowerCase() });
+    console.log(`🔍 Registration check for ${email.toLowerCase()}:`, existingEmailUser ? `Found user: ${existingEmailUser._id}` : 'No existing user');
     if (existingEmailUser) {
       return res.status(400).json({
         success: false,
