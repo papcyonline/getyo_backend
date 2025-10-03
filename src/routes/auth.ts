@@ -65,7 +65,9 @@ router.post('/register', async (req, res) => {
 
     // Create user with default preferences
     const user = await User.create({
-      name,
+      fullName: name,
+      preferredName: name.split(' ')[0], // Use first name as preferred name
+      name, // Legacy field for compatibility
       email: email.toLowerCase(),
       password: hashedPassword,
       phone,
@@ -109,7 +111,10 @@ router.post('/register', async (req, res) => {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error',
+      error: process.env.NODE_ENV === 'production'
+        ? 'Internal server error'
+        : (error instanceof Error ? error.message : 'Internal server error'),
+      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined,
     } as ApiResponse<null>);
   }
 });
@@ -252,7 +257,9 @@ router.post('/oauth/google', async (req, res) => {
     if (!user) {
       // Create new user with Google OAuth
       user = await User.create({
-        name,
+        fullName: name,
+        preferredName: name.split(' ')[0], // Use first name as preferred name
+        name, // Legacy field for compatibility
         email: email.toLowerCase(),
         password: Math.random().toString(36).slice(-12), // Random password for OAuth users
         preferences: {
@@ -321,7 +328,9 @@ router.post('/oauth/apple', async (req, res) => {
       // Create new user with Apple OAuth
       const name = fullName || email.split('@')[0];
       user = await User.create({
-        name,
+        fullName: name,
+        preferredName: name.split(' ')[0], // Use first name as preferred name
+        name, // Legacy field for compatibility
         email: email.toLowerCase(),
         password: Math.random().toString(36).slice(-12), // Random password for OAuth users
         preferences: {
