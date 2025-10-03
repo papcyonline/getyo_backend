@@ -696,6 +696,19 @@ router.post('/verify-otp', async (req, res) => {
         createdAt: o.createdAt
       })));
 
+      // TEMPORARY BYPASS: Allow any OTP code for development
+      if (process.env.NODE_ENV === 'development') {
+        console.log('⚠️ DEVELOPMENT MODE: OTP bypass enabled - accepting any code');
+        return res.json({
+          success: true,
+          data: {
+            verified: true,
+            type
+          },
+          message: 'OTP verified successfully (development bypass)'
+        } as ApiResponse<{ verified: boolean; type: string }>);
+      }
+
       return res.status(400).json({
         success: false,
         error: 'OTP not found or expired'
