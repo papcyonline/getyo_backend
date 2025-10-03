@@ -169,8 +169,7 @@ router.post('/register-enhanced', async (req, res) => {
     console.log('🔑 Password handling:', {
       receivedPassword: !!password,
       usingGeneratedPassword: !password,
-      passwordToStore: password ? 'user-provided' : 'auto-generated',
-      actualPasswordReceived: password // This will show the actual password during registration
+      passwordLength: userPassword.length
     });
 
     // Hash password
@@ -541,26 +540,42 @@ router.post('/send-phone-otp', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    // Normalize phone (trim whitespace)
+    const normalizedPhone = phone.trim();
+
     // Generate 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
+    console.log(`📱 Sending OTP to phone: "${normalizedPhone}"`);
+
     // Delete any existing OTP for this phone
-    await OTP.deleteMany({ identifier: phone, type: 'phone' });
+    const deleteResult = await OTP.deleteMany({ identifier: normalizedPhone, type: 'phone' });
+    console.log(`🗑️ Deleted ${deleteResult.deletedCount} existing OTPs for ${normalizedPhone}`);
 
     // Store OTP in MongoDB with 10-minute expiry
-    await OTP.create({
-      identifier: phone,
+    const otpDoc = await OTP.create({
+      identifier: normalizedPhone,
       code: otpCode,
       type: 'phone',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       attempts: 0
     });
 
+    console.log(`✅ OTP created in DB:`, {
+      id: otpDoc._id,
+      identifier: otpDoc.identifier,
+      code: otpDoc.code,
+      type: otpDoc.type,
+      expiresAt: otpDoc.expiresAt.toISOString()
+    });
+
     // Send SMS using Twilio service
-    const smsSent = await smsService.sendOTP(phone, otpCode);
+    const smsSent = await smsService.sendOTP(normalizedPhone, otpCode);
 
     if (!smsSent) {
-      console.warn(`Failed to send SMS to ${phone}, but OTP stored for development`);
+      console.warn(`Failed to send SMS to ${normalizedPhone}, but OTP stored for development`);
+    } else {
+      console.log(`✅ OTP SMS sent successfully to ${normalizedPhone}`);
     }
 
     res.json({
@@ -595,27 +610,39 @@ router.post('/send-email-otp', async (req, res) => {
     // Generate 6-digit OTP
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // Normalize email (lowercase, trim)
+    const normalizedEmail = email.toLowerCase().trim();
+
+    console.log(`📧 Sending OTP to email: "${normalizedEmail}"`);
+
     // Delete any existing OTP for this email
-    await OTP.deleteMany({ identifier: email, type: 'email' });
+    const deleteResult = await OTP.deleteMany({ identifier: normalizedEmail, type: 'email' });
+    console.log(`🗑️ Deleted ${deleteResult.deletedCount} existing OTPs for ${normalizedEmail}`);
 
     // Store OTP in MongoDB with 10-minute expiry
-    await OTP.create({
-      identifier: email,
+    const otpDoc = await OTP.create({
+      identifier: normalizedEmail,
       code: otpCode,
       type: 'email',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       attempts: 0
     });
 
-    console.log(`📧 OTP generated for ${email}: ${otpCode} (expires: ${new Date(Date.now() + 10 * 60 * 1000).toISOString()})`);
+    console.log(`✅ OTP created in DB:`, {
+      id: otpDoc._id,
+      identifier: otpDoc.identifier,
+      code: otpDoc.code,
+      type: otpDoc.type,
+      expiresAt: otpDoc.expiresAt.toISOString()
+    });
 
     // Send email using Resend service
-    const emailSent = await emailService.sendOTPEmail(email, otpCode);
+    const emailSent = await emailService.sendOTPEmail(normalizedEmail, otpCode);
 
     if (!emailSent) {
-      console.warn(`Failed to send email to ${email}, but OTP stored for development`);
+      console.warn(`Failed to send email to ${normalizedEmail}, but OTP stored for development`);
     } else {
-      console.log(`✅ OTP email sent successfully to ${email}`);
+      console.log(`✅ OTP email sent successfully to ${normalizedEmail}`);
     }
 
     res.json({
@@ -647,15 +674,28 @@ router.post('/verify-otp', async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    console.log(`🔍 Verifying OTP for ${identifier}, type: ${type}`);
+    // Normalize identifier (lowercase, trim)
+    const normalizedIdentifier = identifier.toLowerCase().trim();
+
+    console.log(`🔍 Verifying OTP for identifier: "${normalizedIdentifier}", type: ${type}`);
+    console.log(`📥 Received OTP code: "${otp}"`);
 
     // Get stored OTP from MongoDB
-    const storedOtp = await OTP.findOne({ identifier, type });
+    const storedOtp = await OTP.findOne({ identifier: normalizedIdentifier, type });
 
     if (!storedOtp) {
-      console.log(`❌ OTP not found for ${identifier}`);
-      const otpCount = await OTP.countDocuments();
-      console.log(`📋 Total OTPs in database: ${otpCount}`);
+      console.log(`❌ OTP not found for identifier: "${normalizedIdentifier}", type: ${type}`);
+
+      // Debug: Show all OTPs in database
+      const allOtps = await OTP.find({}).limit(10);
+      console.log(`📋 All OTPs in database (showing up to 10):`, allOtps.map(o => ({
+        identifier: o.identifier,
+        type: o.type,
+        code: o.code,
+        expiresAt: o.expiresAt,
+        createdAt: o.createdAt
+      })));
+
       return res.status(400).json({
         success: false,
         error: 'OTP not found or expired'
