@@ -12,7 +12,11 @@ export interface IUser extends Document {
   password: string;
   phone?: string;
   assistantName?: string;
+  assistantGender?: 'male' | 'female' | 'non-binary';
+  assistantVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
   assistantProfileImage?: string;
+  hasCompletedOnboarding: boolean;
+  agentConfiguration?: any;
   preferences: UserPreferences;
   integrations: UserIntegrations;
   // Password reset fields
@@ -171,9 +175,12 @@ export interface UserDetailsData {
 export interface RegistrationRequest {
   userDetails: UserDetailsData;
   email: string;
-  phone: string;
-  assistantName: string;
-  password?: string; // Optional for now, could be generated
+  phone?: string; // Optional - not required for registration
+  assistantName?: string; // Optional - can be set later
+  password?: string; // Optional - generated for OAuth users
+  preferences?: {
+    language?: string;
+  };
 }
 
 export interface PersonalAssistantContext {

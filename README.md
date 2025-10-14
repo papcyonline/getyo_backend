@@ -5,11 +5,12 @@ A powerful Node.js/TypeScript backend for the Yo! Personal Assistant mobile appl
 ## 🚀 Features
 
 ### Authentication & Security
-- JWT-based authentication
-- Phone verification via Twilio SMS
-- Email verification via Resend
-- OTP verification (expires in 10 minutes, max 3 attempts)
-- Secure password hashing with bcrypt
+- JWT-based authentication (7-day expiration)
+- Email & Password registration
+- Google OAuth Sign-In
+- Apple OAuth Sign-In
+- Email OTP for password reset (expires in 10 minutes, max 3 attempts)
+- Secure password hashing with bcrypt (12 salt rounds)
 - Protected API routes with middleware
 
 ### Core Functionality
@@ -124,13 +125,16 @@ npm start
 ## 📡 API Endpoints
 
 ### Authentication
-- `POST /api/auth/send-phone-otp` - Send OTP to phone
-- `POST /api/auth/send-email-otp` - Send OTP to email
-- `POST /api/auth/verify-otp` - Verify OTP code
-- `POST /api/auth/register-enhanced` - Register new user
-- `POST /api/auth/login` - Login user
-- `POST /api/auth/forgot-password` - Request password reset
-- `POST /api/auth/reset-password` - Reset password
+- `POST /api/auth/register` - Register with email and password
+- `POST /api/auth/register-enhanced` - Register with enhanced profile details
+- `POST /api/auth/oauth/google` - Google OAuth login/register
+- `POST /api/auth/oauth/apple` - Apple OAuth login/register
+- `POST /api/auth/login` - Login with email and password
+- `POST /api/auth/forgot-password` - Request password reset OTP via email
+- `POST /api/auth/verify-reset-otp` - Verify password reset OTP
+- `POST /api/auth/reset-password` - Reset password with OTP
+- `POST /api/auth/change-password` - Change password (authenticated)
+- `GET /api/auth/me` - Get current user profile
 
 ### Users
 - `GET /api/users/profile` - Get user profile
@@ -160,9 +164,36 @@ npm start
 - `GET /api/conversations/:id` - Get conversation by ID
 - `DELETE /api/conversations/:id` - Delete conversation
 
+### AI (Enhanced)
+- `POST /api/ai/chat` - Chat with AI assistant
+- `POST /api/ai/process-command` - Process natural language commands
+- `GET /api/ai/suggestions` - Get AI-generated suggestions based on user data
+- `GET /api/ai/daily-briefing` - Get daily briefing with tasks, events, and reminders
+
+### Reminders
+- `GET /api/reminders` - Get all reminders (query: status, isUrgent)
+- `GET /api/reminders/upcoming` - Get upcoming reminders (query: hours)
+- `GET /api/reminders/overdue` - Get overdue reminders
+- `POST /api/reminders` - Create reminder
+- `PUT /api/reminders/:id` - Update reminder
+- `POST /api/reminders/:id/snooze` - Snooze reminder (body: minutes)
+- `POST /api/reminders/:id/toggle-status` - Toggle status (body: status)
+- `DELETE /api/reminders/:id` - Delete reminder
+
+### Notifications (NEW)
+- `GET /api/notifications` - Get all notifications (query: read, type, priority, limit)
+- `GET /api/notifications/count` - Get unread notification count
+- `GET /api/notifications/recent` - Get recent notifications (query: limit)
+- `POST /api/notifications` - Create notification
+- `POST /api/notifications/:id/read` - Mark notification as read
+- `POST /api/notifications/read-all` - Mark all notifications as read
+- `DELETE /api/notifications/:id` - Delete notification
+- `DELETE /api/notifications/read/clear` - Clear all read notifications
+
 ### Voice
 - `POST /api/voice/process` - Process voice input (transcription)
 - `POST /api/voice/synthesize` - Convert text to speech
+- `POST /api/voice/process-command` - Voice-first command processing (auto-create tasks/reminders/events)
 
 ### Assistant Setup
 - `POST /api/assistant/setup` - Complete assistant setup
@@ -194,10 +225,12 @@ yo-backend/
 
 ## 🔒 Security Features
 
-- **OTP Verification**: 6-digit codes with 10-minute expiration
-- **Rate Limiting**: Max 3 OTP attempts per request
-- **Password Hashing**: bcrypt with salt rounds
-- **JWT Tokens**: Secure session management
+- **Email OTP for Password Reset**: 6-digit codes with 10-minute expiration
+- **Rate Limiting**: Max 3 OTP verification attempts
+- **Password Hashing**: bcrypt with 12 salt rounds
+- **JWT Tokens**: 7-day expiration, secure session management
+- **OAuth Support**: Google and Apple Sign-In
+- **Email Validation**: Format validation and normalization
 - **Environment Variables**: Sensitive data stored securely
 - **CORS Protection**: Configurable allowed origins
 - **Input Validation**: Request data validation

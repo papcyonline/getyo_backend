@@ -52,7 +52,23 @@ const AgentLearningSchema = new Schema({
 
 // Agent Privacy Settings
 const AgentPrivacySchema = new Schema({
+  // Data Processing & Storage
+  localProcessing: { type: Boolean, default: true },
+  encryptedStorage: { type: Boolean, default: true },
+  dataMinimization: { type: Boolean, default: true },
+  conversationHistory: { type: Boolean, default: true },
+  autoDelete: { type: Boolean, default: false },
   dataRetentionDays: { type: Number, default: 90 },
+
+  // Security Features
+  biometricLock: { type: Boolean, default: false },
+
+  // Permissions
+  locationAccess: { type: Boolean, default: false },
+  contactsAccess: { type: Boolean, default: false },
+  calendarAccess: { type: Boolean, default: true },
+
+  // Analytics & Personalization
   shareAnalytics: { type: Boolean, default: false },
   personalizeExperience: { type: Boolean, default: true },
   crossDeviceSync: { type: Boolean, default: true },
@@ -147,6 +163,29 @@ const UserIntegrationsSchema = new Schema({
   },
 }, { _id: false });
 
+// Legal Acceptance Schema for Terms & Privacy tracking
+const LegalAcceptanceSchema = new Schema({
+  termsOfService: {
+    accepted: { type: Boolean, default: false },
+    version: { type: String }, // e.g., "1.0", "1.1", "2.0"
+    acceptedAt: { type: Date },
+    ipAddress: { type: String }, // For legal record keeping
+  },
+  privacyPolicy: {
+    accepted: { type: Boolean, default: false },
+    version: { type: String },
+    acceptedAt: { type: Date },
+    ipAddress: { type: String },
+  },
+  // History of all acceptances (for audit trail)
+  acceptanceHistory: [{
+    documentType: { type: String, enum: ['terms', 'privacy'] },
+    version: String,
+    acceptedAt: Date,
+    ipAddress: String,
+  }],
+}, { _id: false });
+
 const UserSchema = new Schema<any>({
   // Enhanced user identity fields
   fullName: { type: String, required: true, trim: true },
@@ -155,7 +194,7 @@ const UserSchema = new Schema<any>({
   name: { type: String, required: true, trim: true }, // Legacy field (set to preferredName for compatibility)
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true, minlength: 6 },
-  phone: { type: String, trim: true },
+  phone: { type: String, trim: true }, // Optional field - not required for registration
   assistantName: { type: String, trim: true },
   assistantGender: { type: String, enum: ['male', 'female', 'non-binary'], default: 'female' },
   assistantVoice: {
@@ -174,6 +213,7 @@ const UserSchema = new Schema<any>({
   preferences: { type: UserPreferencesSchema, default: () => ({}) },
   agentConfiguration: { type: AgentConfigurationSchema, default: () => ({}) },
   integrations: { type: UserIntegrationsSchema, default: () => ({}) },
+  legalAcceptance: { type: LegalAcceptanceSchema, default: () => ({}) },
   // Onboarding status
   hasCompletedOnboarding: { type: Boolean, default: false },
   // Password reset fields
@@ -222,6 +262,7 @@ UserSchema.methods.toAuthJSON = function() {
     assistantProfileImage: this.assistantProfileImage,
     preferences: this.preferences,
     integrations: this.integrations,
+    legalAcceptance: this.legalAcceptance,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };

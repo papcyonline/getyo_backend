@@ -310,22 +310,71 @@ router.put('/learning', authenticateToken, async (req: any, res) => {
 router.put('/privacy', authenticateToken, async (req: any, res) => {
   try {
     const userId = req.userId;
-    const { dataRetentionDays, shareAnalytics, personalizeExperience, crossDeviceSync } = req.body;
+    const {
+      // Data Processing & Storage
+      localProcessing,
+      encryptedStorage,
+      dataMinimization,
+      conversationHistory,
+      autoDelete,
+      dataRetentionDays,
+      // Security Features
+      biometricLock,
+      // Permissions
+      locationAccess,
+      contactsAccess,
+      calendarAccess,
+      // Analytics & Personalization
+      shareAnalytics,
+      personalizeExperience,
+      crossDeviceSync
+    } = req.body;
 
     const updateData: any = {};
 
+    // Data Processing & Storage
+    if (typeof localProcessing === 'boolean') {
+      updateData['agentConfiguration.privacy.localProcessing'] = localProcessing;
+    }
+    if (typeof encryptedStorage === 'boolean') {
+      updateData['agentConfiguration.privacy.encryptedStorage'] = encryptedStorage;
+    }
+    if (typeof dataMinimization === 'boolean') {
+      updateData['agentConfiguration.privacy.dataMinimization'] = dataMinimization;
+    }
+    if (typeof conversationHistory === 'boolean') {
+      updateData['agentConfiguration.privacy.conversationHistory'] = conversationHistory;
+    }
+    if (typeof autoDelete === 'boolean') {
+      updateData['agentConfiguration.privacy.autoDelete'] = autoDelete;
+    }
     if (typeof dataRetentionDays === 'number' && dataRetentionDays > 0) {
       updateData['agentConfiguration.privacy.dataRetentionDays'] = dataRetentionDays;
     }
 
+    // Security Features
+    if (typeof biometricLock === 'boolean') {
+      updateData['agentConfiguration.privacy.biometricLock'] = biometricLock;
+    }
+
+    // Permissions
+    if (typeof locationAccess === 'boolean') {
+      updateData['agentConfiguration.privacy.locationAccess'] = locationAccess;
+    }
+    if (typeof contactsAccess === 'boolean') {
+      updateData['agentConfiguration.privacy.contactsAccess'] = contactsAccess;
+    }
+    if (typeof calendarAccess === 'boolean') {
+      updateData['agentConfiguration.privacy.calendarAccess'] = calendarAccess;
+    }
+
+    // Analytics & Personalization
     if (typeof shareAnalytics === 'boolean') {
       updateData['agentConfiguration.privacy.shareAnalytics'] = shareAnalytics;
     }
-
     if (typeof personalizeExperience === 'boolean') {
       updateData['agentConfiguration.privacy.personalizeExperience'] = personalizeExperience;
     }
-
     if (typeof crossDeviceSync === 'boolean') {
       updateData['agentConfiguration.privacy.crossDeviceSync'] = crossDeviceSync;
     }
@@ -705,6 +754,83 @@ router.put('/ai-assistant/toggle', authenticateToken, async (req: any, res) => {
     } as ApiResponse<any>);
   } catch (error) {
     console.error('Error toggling AI Assistant setting:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   PUT /api/agent-config/intelligence-level
+// @desc    Update AI intelligence level (creativity, formality, or proactivity)
+// @access  Private
+router.put('/intelligence-level', authenticateToken, async (req: any, res) => {
+  try {
+    const userId = req.userId;
+    const { levelType, value } = req.body;
+
+    // Validate inputs
+    if (!levelType || value === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'levelType and value are required',
+      } as ApiResponse<null>);
+    }
+
+    // Validate levelType
+    const validLevelTypes = ['creativity', 'formality', 'proactivity'];
+    if (!validLevelTypes.includes(levelType)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid levelType. Must be one of: ${validLevelTypes.join(', ')}`,
+      } as ApiResponse<null>);
+    }
+
+    // Validate value (should be between 0 and 1)
+    if (typeof value !== 'number' || value < 0 || value > 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Value must be a number between 0 and 1',
+      } as ApiResponse<null>);
+    }
+
+    // Map levelType to the correct field name
+    const fieldMap: Record<string, string> = {
+      creativity: 'creativityLevel',
+      formality: 'formalityLevel',
+      proactivity: 'proactivityLevel',
+    };
+
+    const fieldName = fieldMap[levelType];
+    const updatePath = `agentConfiguration.aiAssistant.intelligenceLevels.${fieldName}`;
+
+    console.log(`📊 Updating ${fieldName} to ${value} for user ${userId}`);
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: { [updatePath]: value } },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        intelligenceLevels: user.agentConfiguration?.aiAssistant?.intelligenceLevels || {},
+        updated: {
+          [fieldName]: value,
+        },
+      },
+      message: `${levelType.charAt(0).toUpperCase() + levelType.slice(1)} level updated successfully`,
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Error updating intelligence level:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

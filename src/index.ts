@@ -20,12 +20,14 @@ import LegalService from './services/LegalService';
 
 // Import routes
 import authRoutes from './routes/auth';
+import refreshTokenRoutes from './routes/refreshToken';
 import userRoutes from './routes/users';
 import voiceRoutes from './routes/voice';
 import taskRoutes from './routes/tasks';
 import eventRoutes from './routes/events';
 import reminderRoutes from './routes/reminders';
 import noteRoutes from './routes/notes';
+import notificationRoutes from './routes/notifications';
 import conversationRoutes from './routes/conversations';
 import aiRoutes from './routes/ai';
 import integrationRoutes from './routes/integrations';
@@ -33,6 +35,7 @@ import assistantRoutes from './routes/assistant';
 import agentConfigRoutes from './routes/agentConfig';
 import legalRoutes from './routes/legal';
 import transcriptionRoutes from './routes/transcription';
+import onboardingRoutes from './routes/onboarding';
 
 const app = express();
 const server = http.createServer(app);
@@ -87,12 +90,15 @@ app.get('/', (req, res) => {
 
 // Mount API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', refreshTokenRoutes);
+app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/reminders', reminderRoutes);
 app.use('/api/notes', noteRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/integrations', integrationRoutes);

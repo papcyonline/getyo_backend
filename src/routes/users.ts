@@ -2,6 +2,7 @@ import express from 'express';
 import { User } from '../models';
 import { ApiResponse } from '../types';
 import { authenticateToken } from '../middleware/auth';
+import { uploadImageBuffer, upload } from '../services/imageUpload';
 
 const router = express.Router();
 
@@ -30,10 +31,14 @@ router.get('/profile', async (req, res) => {
       preferredName: user.preferredName,
       title: user.title,
       assistantName: user.assistantName,
+      assistantProfileImage: user.assistantProfileImage,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
       // Legacy field for backward compatibility
       name: user.name,
       email: user.email,
       phone: user.phone,
+      profileImage: user.profileImage,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -86,10 +91,14 @@ router.put('/profile', async (req, res) => {
       preferredName: user.preferredName,
       title: user.title,
       assistantName: user.assistantName,
+      assistantProfileImage: user.assistantProfileImage,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
       // Legacy field for backward compatibility
       name: user.name,
       email: user.email,
       phone: user.phone,
+      profileImage: user.profileImage,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -103,6 +112,78 @@ router.put('/profile', async (req, res) => {
     } as ApiResponse<any>);
   } catch (error) {
     console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/users/profile/image
+// @desc    Upload user profile image
+// @access  Private
+router.post('/profile/image', upload.single('profileImage'), async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Handle profile image upload
+    const imageFile = (req as any).file;
+    if (!imageFile) {
+      return res.status(400).json({
+        success: false,
+        error: 'No image file provided',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📸 Processing user profile image upload...');
+
+    const uploadResult = await uploadImageBuffer(
+      imageFile.buffer,
+      imageFile.originalname,
+      'user-profiles'
+    );
+
+    if (uploadResult.success && uploadResult.url) {
+      console.log('✅ Profile image uploaded successfully:', uploadResult.url);
+
+      // Update user with new profile image
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { profileImage: uploadResult.url },
+        { new: true, runValidators: true }
+      ).select('-password');
+
+      if (!updatedUser) {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to update user profile image',
+        } as ApiResponse<null>);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          imageUrl: updatedUser.profileImage,
+        },
+        message: 'Profile image uploaded successfully',
+      } as ApiResponse<{ imageUrl: string | undefined }>);
+    } else {
+      console.error('❌ Failed to upload profile image:', uploadResult.error);
+      return res.status(400).json({
+        success: false,
+        error: `Failed to upload profile image: ${uploadResult.error}`,
+      } as ApiResponse<null>);
+    }
+  } catch (error) {
+    console.error('Error uploading profile image:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -335,6 +416,85 @@ router.put('/wake-word', async (req, res) => {
     } as ApiResponse<any>);
   } catch (error) {
     console.error('Update wake word settings error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   GET /api/users/privacy-settings
+// @desc    Get user privacy and security settings
+// @access  Private
+router.get('/privacy-settings', async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    const privacySettings = {
+      biometricLock: user.privacySettings?.biometricLock ?? true,
+      dataEncryption: user.privacySettings?.dataEncryption ?? true,
+      analyticsSharing: user.privacySettings?.analyticsSharing ?? false,
+      crashReporting: user.privacySettings?.crashReporting ?? true,
+      locationAccess: user.privacySettings?.locationAccess ?? true,
+    };
+
+    res.json({
+      success: true,
+      data: privacySettings,
+      message: 'Privacy settings retrieved',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Get privacy settings error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   PUT /api/users/privacy-settings
+// @desc    Update user privacy and security settings
+// @access  Private
+router.put('/privacy-settings', async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { biometricLock, dataEncryption, analyticsSharing, crashReporting, locationAccess } = req.body;
+
+    const updateData: any = {};
+    if (biometricLock !== undefined) updateData['privacySettings.biometricLock'] = biometricLock;
+    if (dataEncryption !== undefined) updateData['privacySettings.dataEncryption'] = dataEncryption;
+    if (analyticsSharing !== undefined) updateData['privacySettings.analyticsSharing'] = analyticsSharing;
+    if (crashReporting !== undefined) updateData['privacySettings.crashReporting'] = crashReporting;
+    if (locationAccess !== undefined) updateData['privacySettings.locationAccess'] = locationAccess;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    res.json({
+      success: true,
+      data: user.privacySettings,
+      message: 'Privacy settings updated successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Update privacy settings error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

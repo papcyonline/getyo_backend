@@ -3,9 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { User } from '../models';
 import OTP from '../models/OTP';
-import { ApiResponse, AuthPayload, RegistrationRequest, UserDetailsData } from '../types';
+import { ApiResponse, AuthPayload, RegistrationRequest } from '../types';
 import { authenticateToken } from '../middleware/auth';
-import smsService from '../services/smsService';
 import emailService from '../services/emailService';
 
 const router = express.Router();
@@ -23,11 +22,11 @@ const generateToken = (userId: string, email: string): string => {
 };
 
 // @route   POST /api/auth/register
-// @desc    Register a new user
+// @desc    Register a new user with email and password
 // @access  Public
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, phone } = req.body;
+    const { name, email, password, acceptedTerms, termsVersion, privacyVersion } = req.body;
 
     // Validate required fields
     if (!name || !email || !password) {
@@ -37,63 +36,124 @@ router.post('/register', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    // Validate legal acceptance
+    if (!acceptedTerms) {
+      return res.status(400).json({
+        success: false,
+        error: 'You must accept the Terms of Service and Privacy Policy to create an account',
+      } as ApiResponse<null>);
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format',
+      } as ApiResponse<null>);
+    }
+
+    // Validate password strength
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long',
+      } as ApiResponse<null>);
+    }
+
     // Check if user already exists with this email
-    const existingEmailUser = await User.findOne({ email: email.toLowerCase() });
-    console.log(`🔍 Registration check for ${email.toLowerCase()}:`, existingEmailUser ? `Found user: ${existingEmailUser._id}` : 'No existing user');
-    if (existingEmailUser) {
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       return res.status(400).json({
         success: false,
         error: 'An account with this email already exists',
       } as ApiResponse<null>);
     }
 
-    // Check if user already exists with this phone number (if phone is provided)
-    if (phone) {
-      const existingPhoneUser = await User.findOne({ phone: phone.trim() });
-      if (existingPhoneUser) {
-        return res.status(400).json({
-          success: false,
-          error: 'An account with this phone number already exists',
-        } as ApiResponse<null>);
-      }
-    }
-
     // Hash password
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Create user with default preferences
+    // Get client IP address for legal record
+    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+    const now = new Date();
+
+    // Create user with default preferences and legal acceptance
     const user = await User.create({
       fullName: name,
       preferredName: name.split(' ')[0], // Use first name as preferred name
       name, // Legacy field for compatibility
       email: email.toLowerCase(),
       password: hashedPassword,
-      phone,
+      hasCompletedOnboarding: false, // User needs to complete profile setup
       preferences: {
         voiceEnabled: true,
         reminderStyle: 'friendly',
         dailyBriefingTime: '08:00',
-        theme: 'light',
-        wakeWord: 'yo',
+        theme: 'dark',
+        wakeWord: 'Hey Yo',
         conversationStyle: 'casual',
         language: 'en',
       },
       integrations: {},
+      legalAcceptance: {
+        termsOfService: {
+          accepted: true,
+          version: termsVersion || '1.0',
+          acceptedAt: now,
+          ipAddress: ipAddress,
+        },
+        privacyPolicy: {
+          accepted: true,
+          version: privacyVersion || '1.0',
+          acceptedAt: now,
+          ipAddress: ipAddress,
+        },
+        acceptanceHistory: [
+          {
+            documentType: 'terms',
+            version: termsVersion || '1.0',
+            acceptedAt: now,
+            ipAddress: ipAddress,
+          },
+          {
+            documentType: 'privacy',
+            version: privacyVersion || '1.0',
+            acceptedAt: now,
+            ipAddress: ipAddress,
+          },
+        ],
+      },
     });
 
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
+    // Send welcome email (optional, non-blocking)
+    emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
+      console.error('Failed to send welcome email:', err)
+    );
+
+    console.log(`✅ User registered with legal acceptance - Terms: ${termsVersion || '1.0'}, Privacy: ${privacyVersion || '1.0'}`);
+
     // Remove password from response
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
       assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
+      legalAcceptance: user.legalAcceptance,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -110,10 +170,7 @@ router.post('/register', async (req, res) => {
     console.error('Registration error:', error);
     res.status(500).json({
       success: false,
-      error: process.env.NODE_ENV === 'production'
-        ? 'Internal server error'
-        : (error instanceof Error ? error.message : 'Internal server error'),
-      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined,
+      error: 'Internal server error',
     } as ApiResponse<null>);
   }
 });
@@ -123,14 +180,9 @@ router.post('/register', async (req, res) => {
 // @access  Public
 router.post('/register-enhanced', async (req, res) => {
   try {
-    const { userDetails, email, phone, assistantName, password }: RegistrationRequest = req.body;
-    console.log('🔐 Enhanced registration attempt:', {
-      email,
-      hasPassword: !!password,
-      passwordLength: password?.length
-    });
+    const { userDetails, email, password, preferences }: RegistrationRequest = req.body;
 
-    // Validate required fields - use defaults for missing userDetails
+    // Validate required fields
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -138,39 +190,39 @@ router.post('/register-enhanced', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format',
+      } as ApiResponse<null>);
+    }
+
+    // Validate password if provided
+    if (password && password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password must be at least 6 characters long',
+      } as ApiResponse<null>);
+    }
+
     // Use defaults if userDetails are missing
     const fullName = userDetails?.fullName?.trim() || 'User';
     const preferredName = userDetails?.preferredName?.trim() || fullName;
     const title = userDetails?.title?.trim() || '';
-    const finalAssistantName = assistantName?.trim() || 'Assistant';
 
     // Check if user already exists with this email
-    const existingEmailUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingEmailUser) {
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
       return res.status(400).json({
         success: false,
         error: 'An account with this email already exists',
       } as ApiResponse<null>);
     }
 
-    // Check if user already exists with this phone number (only if phone is provided)
-    if (phone && phone.trim()) {
-      const existingPhoneUser = await User.findOne({ phone: phone.trim() });
-      if (existingPhoneUser) {
-        return res.status(400).json({
-          success: false,
-          error: 'An account with this phone number already exists',
-        } as ApiResponse<null>);
-      }
-    }
-
-    // Generate a temporary password if none provided (user can set it later)
+    // Generate a temporary password if none provided (for OAuth users)
     const userPassword = password || Math.random().toString(36).slice(-12);
-    console.log('🔑 Password handling:', {
-      receivedPassword: !!password,
-      usingGeneratedPassword: !password,
-      passwordLength: userPassword.length
-    });
 
     // Hash password
     const saltRounds = 12;
@@ -184,8 +236,6 @@ router.post('/register-enhanced', async (req, res) => {
       name: preferredName, // Legacy field for backward compatibility
       email: email.toLowerCase(),
       password: hashedPassword,
-      phone: phone ? phone.trim() : undefined,
-      assistantName: finalAssistantName,
       preferences: {
         voiceEnabled: true,
         reminderStyle: 'friendly',
@@ -193,13 +243,18 @@ router.post('/register-enhanced', async (req, res) => {
         theme: 'dark',
         wakeWord: 'Hey Yo',
         conversationStyle: 'casual',
-        language: 'en',
+        language: preferences?.language || 'en',
       },
       integrations: {},
     });
 
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
+
+    // Send welcome email (optional, non-blocking)
+    emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
+      console.error('Failed to send welcome email:', err)
+    );
 
     // Return enhanced user response
     const userResponse = {
@@ -211,6 +266,11 @@ router.post('/register-enhanced', async (req, res) => {
       email: user.email,
       phone: user.phone,
       assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -251,15 +311,18 @@ router.post('/oauth/google', async (req, res) => {
 
     // Check if user exists
     let user = await User.findOne({ email: email.toLowerCase() });
+    let isNewUser = false;
 
     if (!user) {
-      // Create new user with Google OAuth
+      // Create new user with Google OAuth - minimal profile for now
+      isNewUser = true;
       user = await User.create({
         fullName: name,
-        preferredName: name.split(' ')[0], // Use first name as preferred name
+        preferredName: name.split(' ')[0], // Temporary - user can customize later
         name, // Legacy field for compatibility
         email: email.toLowerCase(),
-        password: Math.random().toString(36).slice(-12), // Random password for OAuth users
+        password: await bcrypt.hash(Math.random().toString(36).slice(-12), 12), // Random password for OAuth users
+        hasCompletedOnboarding: false, // Important: User needs to complete profile
         preferences: {
           voiceEnabled: true,
           reminderStyle: 'friendly',
@@ -271,6 +334,11 @@ router.post('/oauth/google', async (req, res) => {
         },
         integrations: {},
       });
+
+      // Send welcome email (optional, non-blocking)
+      emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
+        console.error('Failed to send welcome email:', err)
+      );
     }
 
     // Generate token
@@ -278,10 +346,18 @@ router.post('/oauth/google', async (req, res) => {
 
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
       assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -293,9 +369,11 @@ router.post('/oauth/google', async (req, res) => {
       data: {
         user: userResponse,
         token,
+        isNewUser, // Flag to tell frontend if onboarding is needed
+        requiresOnboarding: !user.hasCompletedOnboarding, // Explicit flag
       },
-      message: 'Google authentication successful',
-    } as ApiResponse<{ user: any; token: string }>);
+      message: isNewUser ? 'Account created successfully' : 'Login successful',
+    } as ApiResponse<{ user: any; token: string; isNewUser: boolean; requiresOnboarding: boolean }>);
   } catch (error) {
     console.error('Google OAuth error:', error);
     res.status(500).json({
@@ -321,16 +399,19 @@ router.post('/oauth/apple', async (req, res) => {
 
     // Check if user exists
     let user = await User.findOne({ email: email.toLowerCase() });
+    let isNewUser = false;
 
     if (!user) {
-      // Create new user with Apple OAuth
+      // Create new user with Apple OAuth - minimal profile for now
+      isNewUser = true;
       const name = fullName || email.split('@')[0];
       user = await User.create({
         fullName: name,
-        preferredName: name.split(' ')[0], // Use first name as preferred name
+        preferredName: name.split(' ')[0], // Temporary - user can customize later
         name, // Legacy field for compatibility
         email: email.toLowerCase(),
-        password: Math.random().toString(36).slice(-12), // Random password for OAuth users
+        password: await bcrypt.hash(Math.random().toString(36).slice(-12), 12), // Random password for OAuth users
+        hasCompletedOnboarding: false, // Important: User needs to complete profile
         preferences: {
           voiceEnabled: true,
           reminderStyle: 'friendly',
@@ -342,6 +423,11 @@ router.post('/oauth/apple', async (req, res) => {
         },
         integrations: {},
       });
+
+      // Send welcome email (optional, non-blocking)
+      emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
+        console.error('Failed to send welcome email:', err)
+      );
     }
 
     // Generate token
@@ -349,10 +435,18 @@ router.post('/oauth/apple', async (req, res) => {
 
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
       assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -364,9 +458,11 @@ router.post('/oauth/apple', async (req, res) => {
       data: {
         user: userResponse,
         token,
+        isNewUser, // Flag to tell frontend if onboarding is needed
+        requiresOnboarding: !user.hasCompletedOnboarding, // Explicit flag
       },
-      message: 'Apple authentication successful',
-    } as ApiResponse<{ user: any; token: string }>);
+      message: isNewUser ? 'Account created successfully' : 'Login successful',
+    } as ApiResponse<{ user: any; token: string; isNewUser: boolean; requiresOnboarding: boolean }>);
   } catch (error) {
     console.error('Apple OAuth error:', error);
     res.status(500).json({
@@ -381,12 +477,10 @@ router.post('/oauth/apple', async (req, res) => {
 // @access  Public
 router.post('/login', async (req, res) => {
   try {
-    console.log('🔐 Login attempt:', { email: req.body.email, hasPassword: !!req.body.password });
     const { email, password } = req.body;
 
     // Validate required fields
     if (!email || !password) {
-      console.log('Login validation failed:', { email: !!email, password: !!password });
       return res.status(400).json({
         success: false,
         error: 'Email and password are required',
@@ -396,30 +490,15 @@ router.post('/login', async (req, res) => {
     // Find user by email
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      console.log('❌ User not found:', email.toLowerCase());
       return res.status(400).json({
         success: false,
         error: 'Invalid email or password',
       } as ApiResponse<null>);
     }
 
-    console.log('👤 User found:', {
-      email: user.email,
-      hasPassword: !!user.password,
-      passwordHashLength: user.password?.length
-    });
-
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
-    console.log('🔐 Password check:', {
-      providedPassword: password,
-      providedLength: password.length,
-      isValid: isPasswordValid
-    });
-
     if (!isPasswordValid) {
-      // Let's test with the password that was supposed to be set
-      console.log('🔍 Debug: Testing if stored password matches what we think it should be');
       return res.status(400).json({
         success: false,
         error: 'Invalid email or password',
@@ -432,12 +511,21 @@ router.post('/login', async (req, res) => {
     // Remove password from response
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
       assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
+      legalAcceptance: user.legalAcceptance,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -482,7 +570,7 @@ router.post('/logout', async (req, res) => {
 // @route   GET /api/auth/me
 // @desc    Get current user
 // @access  Private
-router.get('/me', async (req, res) => {
+router.get('/me', authenticateToken, async (req, res) => {
   try {
     // Get user ID from auth middleware
     const userId = (req as any).user?.userId;
@@ -504,9 +592,18 @@ router.get('/me', async (req, res) => {
 
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
+      assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
@@ -526,84 +623,27 @@ router.get('/me', async (req, res) => {
   }
 });
 
-// @route   POST /api/auth/send-phone-otp
-// @desc    Send OTP for phone verification
+// @route   POST /api/auth/forgot-password
+// @desc    Send OTP for password reset via email
 // @access  Public
-router.post('/send-phone-otp', async (req, res) => {
-  try {
-    const { phone } = req.body;
-
-    if (!phone) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone number is required'
-      } as ApiResponse<null>);
-    }
-
-    // Normalize phone (trim whitespace)
-    const normalizedPhone = phone.trim();
-
-    // Generate 6-digit OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    console.log(`📱 Sending OTP to phone: "${normalizedPhone}"`);
-
-    // Delete any existing OTP for this phone
-    const deleteResult = await OTP.deleteMany({ identifier: normalizedPhone, type: 'phone' });
-    console.log(`🗑️ Deleted ${deleteResult.deletedCount} existing OTPs for ${normalizedPhone}`);
-
-    // Store OTP in MongoDB with 10-minute expiry
-    const otpDoc = await OTP.create({
-      identifier: normalizedPhone,
-      code: otpCode,
-      type: 'phone',
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      attempts: 0
-    });
-
-    console.log(`✅ OTP created in DB:`, {
-      id: otpDoc._id,
-      identifier: otpDoc.identifier,
-      code: otpDoc.code,
-      type: otpDoc.type,
-      expiresAt: otpDoc.expiresAt.toISOString()
-    });
-
-    // Send SMS using Twilio service
-    const smsSent = await smsService.sendOTP(normalizedPhone, otpCode);
-
-    if (!smsSent) {
-      console.warn(`Failed to send SMS to ${normalizedPhone}, but OTP stored for development`);
-    } else {
-      console.log(`✅ OTP SMS sent successfully to ${normalizedPhone}`);
-    }
-
-    res.json({
-      success: true,
-      message: 'OTP sent successfully',
-      // In development, return the OTP for testing
-      ...(process.env.NODE_ENV === 'development' && { data: { otp: otpCode } })
-    } as ApiResponse<any>);
-  } catch (error) {
-    console.error('Send phone OTP error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    } as ApiResponse<null>);
-  }
-});
-
-// @route   POST /api/auth/send-email-otp
-// @desc    Send OTP for email verification
-// @access  Public
-router.post('/send-email-otp', async (req, res) => {
+router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Email is required'
+        error: 'Email is required',
+      } as ApiResponse<null>);
+    }
+
+    // Check if user exists
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      // For security, don't reveal if email exists
+      return res.json({
+        success: true,
+        message: 'If an account exists with this email, a verification code has been sent',
       } as ApiResponse<null>);
     }
 
@@ -613,109 +653,66 @@ router.post('/send-email-otp', async (req, res) => {
     // Normalize email (lowercase, trim)
     const normalizedEmail = email.toLowerCase().trim();
 
-    console.log(`📧 Sending OTP to email: "${normalizedEmail}"`);
-
     // Delete any existing OTP for this email
-    const deleteResult = await OTP.deleteMany({ identifier: normalizedEmail, type: 'email' });
-    console.log(`🗑️ Deleted ${deleteResult.deletedCount} existing OTPs for ${normalizedEmail}`);
+    await OTP.deleteMany({ identifier: normalizedEmail, type: 'reset' });
 
     // Store OTP in MongoDB with 10-minute expiry
-    const otpDoc = await OTP.create({
+    await OTP.create({
       identifier: normalizedEmail,
       code: otpCode,
-      type: 'email',
+      type: 'reset',
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
       attempts: 0
     });
 
-    console.log(`✅ OTP created in DB:`, {
-      id: otpDoc._id,
-      identifier: otpDoc.identifier,
-      code: otpDoc.code,
-      type: otpDoc.type,
-      expiresAt: otpDoc.expiresAt.toISOString()
-    });
-
     // Send email using Resend service
-    const emailSent = await emailService.sendOTPEmail(normalizedEmail, otpCode);
+    const emailSent = await emailService.sendPasswordResetEmail(normalizedEmail, otpCode);
 
     if (!emailSent) {
       console.warn(`Failed to send email to ${normalizedEmail}, but OTP stored for development`);
-    } else {
-      console.log(`✅ OTP email sent successfully to ${normalizedEmail}`);
     }
 
     res.json({
       success: true,
-      message: 'OTP sent successfully',
+      message: 'Verification code sent to your email',
       // In development, return the OTP for testing
       ...(process.env.NODE_ENV === 'development' && { data: { otp: otpCode } })
     } as ApiResponse<any>);
   } catch (error) {
-    console.error('Send email OTP error:', error);
+    console.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
     } as ApiResponse<null>);
   }
 });
 
-// @route   POST /api/auth/verify-otp
-// @desc    Verify OTP
+// @route   POST /api/auth/verify-reset-otp
+// @desc    Verify OTP for password reset
 // @access  Public
-router.post('/verify-otp', async (req, res) => {
+router.post('/verify-reset-otp', async (req, res) => {
   try {
-    const { identifier, otp, type } = req.body; // identifier can be phone or email
+    const { email, otp } = req.body;
 
-    if (!identifier || !otp || !type) {
+    if (!email || !otp) {
       return res.status(400).json({
         success: false,
-        error: 'Identifier, OTP, and type are required'
+        error: 'Email and OTP are required'
       } as ApiResponse<null>);
     }
 
-    // Normalize identifier (lowercase, trim)
-    const normalizedIdentifier = identifier.toLowerCase().trim();
-
-    console.log(`🔍 Verifying OTP for identifier: "${normalizedIdentifier}", type: ${type}`);
-    console.log(`📥 Received OTP code: "${otp}"`);
+    // Normalize email
+    const normalizedEmail = email.toLowerCase().trim();
 
     // Get stored OTP from MongoDB
-    const storedOtp = await OTP.findOne({ identifier: normalizedIdentifier, type });
+    const storedOtp = await OTP.findOne({ identifier: normalizedEmail, type: 'reset' });
 
     if (!storedOtp) {
-      console.log(`❌ OTP not found for identifier: "${normalizedIdentifier}", type: ${type}`);
-
-      // Debug: Show all OTPs in database
-      const allOtps = await OTP.find({}).limit(10);
-      console.log(`📋 All OTPs in database (showing up to 10):`, allOtps.map(o => ({
-        identifier: o.identifier,
-        type: o.type,
-        code: o.code,
-        expiresAt: o.expiresAt,
-        createdAt: o.createdAt
-      })));
-
-      // TEMPORARY BYPASS: Allow any OTP code for development
-      if (process.env.NODE_ENV === 'development') {
-        console.log('⚠️ DEVELOPMENT MODE: OTP bypass enabled - accepting any code');
-        return res.json({
-          success: true,
-          data: {
-            verified: true,
-            type
-          },
-          message: 'OTP verified successfully (development bypass)'
-        } as ApiResponse<{ verified: boolean; type: string }>);
-      }
-
       return res.status(400).json({
         success: false,
         error: 'OTP not found or expired'
       } as ApiResponse<null>);
     }
-
-    console.log(`✅ Found OTP for ${identifier}. Code: ${storedOtp.code}, Expires: ${storedOtp.expiresAt}, Attempts: ${storedOtp.attempts}`);
 
     // Check if OTP is expired
     if (new Date() > storedOtp.expiresAt) {
@@ -745,17 +742,17 @@ router.post('/verify-otp', async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    // OTP verified successfully
-    await OTP.deleteOne({ _id: storedOtp._id });
+    // OTP verified successfully - keep it for the reset-password step
+    // We'll delete it after password is actually reset
 
     res.json({
       success: true,
       data: {
         verified: true,
-        type
+        email: normalizedEmail
       },
       message: 'OTP verified successfully'
-    } as ApiResponse<{ verified: boolean; type: string }>);
+    } as ApiResponse<{ verified: boolean; email: string }>);
   } catch (error) {
     console.error('Verify OTP error:', error);
     res.status(500).json({
@@ -765,78 +762,135 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// @route   POST /api/auth/complete-registration
-// @desc    Complete user registration after OTP verification
+// @route   POST /api/auth/reset-password
+// @desc    Reset password after OTP verification
 // @access  Public
-router.post('/complete-registration', async (req, res) => {
+router.post('/reset-password', async (req, res) => {
   try {
-    const { phone, email, assistantName, language } = req.body;
+    const { email, otp, newPassword } = req.body;
 
-    if (!phone || !email || !assistantName) {
+    if (!email || !otp || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Phone, email, and assistant name are required'
+        error: 'Email, OTP, and new password are required',
       } as ApiResponse<null>);
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { phone }] });
-    if (existingUser) {
+    if (newPassword.length < 6) {
       return res.status(400).json({
         success: false,
-        error: 'User already exists with this email or phone'
+        error: 'New password must be at least 6 characters long',
       } as ApiResponse<null>);
     }
 
-    // Create user with temporary password (they can set it later)
-    const tempPassword = Math.random().toString(36).slice(-8);
-    const hashedPassword = await bcrypt.hash(tempPassword, 12);
+    // Normalize email
+    const normalizedEmail = email.toLowerCase().trim();
 
-    const user = await User.create({
-      name: assistantName, // Using assistant name as user name for now
-      email: email.toLowerCase(),
-      password: hashedPassword,
-      phone,
-      preferences: {
-        voiceEnabled: true,
-        reminderStyle: 'friendly',
-        dailyBriefingTime: '08:00',
-        theme: 'dark',
-        wakeWord: 'yo',
-        conversationStyle: 'casual',
-        language: language || 'en',
-      },
-      integrations: {},
-    });
+    // Verify OTP one more time
+    const storedOtp = await OTP.findOne({ identifier: normalizedEmail, type: 'reset' });
 
-    // Generate JWT token
-    const token = generateToken(user._id.toString(), user.email);
+    if (!storedOtp || storedOtp.code !== otp || new Date() > storedOtp.expiresAt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired OTP',
+      } as ApiResponse<null>);
+    }
 
-    // Remove password from response
+    // Find user
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Update password directly (pre-save hook will hash it)
+    user.password = newPassword;
+    await user.save();
+
+    // Delete the OTP after successful password reset
+    await OTP.deleteOne({ _id: storedOtp._id });
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+    } as ApiResponse<null>);
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/complete-profile
+// @desc    Complete user profile after initial registration (onboarding)
+// @access  Private
+router.post('/complete-profile', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { fullName, preferredName, title, assistantName, phone } = req.body;
+
+    // Validate required fields for PA functionality
+    if (!fullName || !preferredName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Full name and preferred name are required',
+      } as ApiResponse<null>);
+    }
+
+    // Find user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Update user profile with complete information
+    user.fullName = fullName.trim();
+    user.preferredName = preferredName.trim();
+    user.title = title?.trim() || undefined;
+    user.assistantName = assistantName?.trim() || undefined;
+    user.phone = phone?.trim() || undefined;
+    user.name = preferredName.trim(); // Legacy field
+    user.hasCompletedOnboarding = true; // Mark onboarding as complete
+
+    await user.save();
+
     const userResponse = {
       id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
       name: user.name,
       email: user.email,
       phone: user.phone,
+      assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
       preferences: user.preferences,
       integrations: user.integrations,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
 
-    res.status(201).json({
+    res.json({
       success: true,
-      data: {
-        user: userResponse,
-        token,
-      },
-      message: 'Registration completed successfully'
-    } as ApiResponse<{ user: any; token: string }>);
+      data: userResponse,
+      message: 'Profile completed successfully',
+    } as ApiResponse<any>);
   } catch (error) {
-    console.error('Complete registration error:', error);
+    console.error('Complete profile error:', error);
     res.status(500).json({
       success: false,
-      error: 'Internal server error'
+      error: 'Internal server error',
     } as ApiResponse<null>);
   }
 });
@@ -899,153 +953,47 @@ router.post('/change-password', authenticateToken, async (req, res) => {
   }
 });
 
-// @route   POST /api/auth/forgot-password
-// @desc    Send password reset OTP
-// @access  Public
-router.post('/forgot-password', async (req, res) => {
+// @route   GET /api/auth/legal-status
+// @desc    Check if user needs to re-accept updated terms
+// @access  Private
+router.get('/legal-status', authenticateToken, async (req, res) => {
   try {
-    const { email } = req.body;
+    const userId = (req as any).user.userId;
+    const user = await User.findById(userId);
 
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email is required',
-      } as ApiResponse<null>);
-    }
-
-    // Check if user exists
-    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      // For security, don't reveal if email exists
-      return res.json({
-        success: true,
-        message: 'If an account exists with this email, a reset code has been sent',
-      } as ApiResponse<null>);
-    }
-
-    // Generate 6-digit reset code
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Delete any existing reset code for this email
-    await OTP.deleteMany({ identifier: email, type: 'reset' });
-
-    // Store reset code in MongoDB with 15-minute expiry
-    await OTP.create({
-      identifier: email,
-      code: resetCode,
-      type: 'reset',
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-      attempts: 0
-    });
-
-    // Send password reset email using Resend service
-    const emailSent = await emailService.sendPasswordResetEmail(email, resetCode);
-
-    if (!emailSent) {
-      console.warn(`Failed to send password reset email to ${email}, but code stored for development`);
-    }
-
-    res.json({
-      success: true,
-      message: 'Password reset code sent to your email',
-      // In development, return the code for testing
-      ...(process.env.NODE_ENV === 'development' && { data: { resetCode } })
-    } as ApiResponse<any>);
-  } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error',
-    } as ApiResponse<null>);
-  }
-});
-
-// @route   POST /api/auth/reset-password
-// @desc    Reset password using OTP
-// @access  Public
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { email, code, newPassword } = req.body;
-
-    if (!email || !code || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email, reset code, and new password are required',
-      } as ApiResponse<null>);
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        error: 'New password must be at least 6 characters long',
-      } as ApiResponse<null>);
-    }
-
-    // Get stored reset code from MongoDB
-    const storedReset = await OTP.findOne({ identifier: email, type: 'reset' });
-
-    if (!storedReset) {
-      return res.status(400).json({
-        success: false,
-        error: 'Reset code not found or expired',
-      } as ApiResponse<null>);
-    }
-
-    // Check if reset code is expired
-    if (new Date() > storedReset.expiresAt) {
-      await OTP.deleteOne({ _id: storedReset._id });
-      return res.status(400).json({
-        success: false,
-        error: 'Reset code expired',
-      } as ApiResponse<null>);
-    }
-
-    // Check attempts
-    if (storedReset.attempts >= 3) {
-      await OTP.deleteOne({ _id: storedReset._id });
-      return res.status(400).json({
-        success: false,
-        error: 'Too many failed attempts',
-      } as ApiResponse<null>);
-    }
-
-    // Verify reset code
-    if (storedReset.code !== code) {
-      storedReset.attempts++;
-      await storedReset.save();
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid reset code',
-      } as ApiResponse<null>);
-    }
-
-    // Find user and update password
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      await OTP.deleteOne({ _id: storedReset._id });
       return res.status(404).json({
         success: false,
         error: 'User not found',
       } as ApiResponse<null>);
     }
 
-    // Hash new password and update only the password field
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
-    await User.findByIdAndUpdate(user._id, {
-      password: hashedPassword,
-      resetPasswordCode: undefined,
-      resetPasswordExpiry: undefined
-    });
+    const CURRENT_TERMS_VERSION = '1.0';
+    const CURRENT_PRIVACY_VERSION = '1.0';
 
-    // Clean up reset code
-    await OTP.deleteOne({ _id: storedReset._id });
+    const userTermsVersion = user.legalAcceptance?.termsOfService?.version;
+    const userPrivacyVersion = user.legalAcceptance?.privacyPolicy?.version;
+
+    const needsTermsUpdate = !userTermsVersion || userTermsVersion !== CURRENT_TERMS_VERSION;
+    const needsPrivacyUpdate = !userPrivacyVersion || userPrivacyVersion !== CURRENT_PRIVACY_VERSION;
 
     res.json({
       success: true,
-      message: 'Password reset successfully',
-    } as ApiResponse<null>);
+      data: {
+        needsAcceptance: needsTermsUpdate || needsPrivacyUpdate,
+        currentVersions: {
+          terms: CURRENT_TERMS_VERSION,
+          privacy: CURRENT_PRIVACY_VERSION,
+        },
+        userVersions: {
+          terms: userTermsVersion,
+          privacy: userPrivacyVersion,
+        },
+      },
+      message: 'Legal status retrieved successfully',
+    } as ApiResponse<any>);
   } catch (error) {
-    console.error('Reset password error:', error);
+    console.error('Legal status error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
@@ -1053,48 +1001,74 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-// Duplicate route removed - using the first implementation above
-
-// @route   POST /api/auth/verify-reset-code
-// @desc    Verify password reset code
-// @access  Public
-router.post('/verify-reset-code', async (req, res) => {
+// @route   POST /api/auth/accept-legal
+// @desc    Accept or re-accept terms and privacy policy
+// @access  Private
+router.post('/accept-legal', authenticateToken, async (req, res) => {
   try {
-    const { email, code } = req.body;
+    const userId = (req as any).user.userId;
+    const { termsVersion, privacyVersion } = req.body;
 
-    if (!email || !code) {
-      return res.status(400).json({
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
         success: false,
-        error: 'Email and code are required',
+        error: 'User not found',
       } as ApiResponse<null>);
     }
 
-    const user = await User.findOne({
-      email: email.toLowerCase(),
-      resetPasswordCode: code,
-      resetPasswordExpiry: { $gt: Date.now() },
+    const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
+    const now = new Date();
+
+    // Update current acceptance
+    user.legalAcceptance.termsOfService = {
+      accepted: true,
+      version: termsVersion || '1.0',
+      acceptedAt: now,
+      ipAddress: ipAddress,
+    };
+
+    user.legalAcceptance.privacyPolicy = {
+      accepted: true,
+      version: privacyVersion || '1.0',
+      acceptedAt: now,
+      ipAddress: ipAddress,
+    };
+
+    // Add to history
+    if (!user.legalAcceptance.acceptanceHistory) {
+      user.legalAcceptance.acceptanceHistory = [];
+    }
+
+    user.legalAcceptance.acceptanceHistory.push({
+      documentType: 'terms',
+      version: termsVersion || '1.0',
+      acceptedAt: now,
+      ipAddress: ipAddress,
     });
 
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid or expired reset code',
-      } as ApiResponse<null>);
-    }
+    user.legalAcceptance.acceptanceHistory.push({
+      documentType: 'privacy',
+      version: privacyVersion || '1.0',
+      acceptedAt: now,
+      ipAddress: ipAddress,
+    });
+
+    await user.save();
+
+    console.log(`✅ Legal re-acceptance recorded for user ${userId} - Terms: ${termsVersion}, Privacy: ${privacyVersion}`);
 
     res.json({
       success: true,
-      message: 'Code verified successfully',
+      message: 'Legal acceptance recorded successfully',
     } as ApiResponse<null>);
   } catch (error) {
-    console.error('Verify reset code error:', error);
+    console.error('Accept legal error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',
     } as ApiResponse<null>);
   }
 });
-
-// Duplicate route removed - using the first implementation above
 
 export default router;

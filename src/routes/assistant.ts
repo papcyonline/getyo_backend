@@ -151,6 +151,81 @@ router.get('/setup', authenticateToken, async (req: any, res) => {
   }
 });
 
+// @route   PUT /api/assistant/profile-image
+// @desc    Update Personal Assistant profile image only
+// @access  Private
+router.put('/profile-image', authenticateToken, upload.single('profileImage'), async (req: any, res) => {
+  try {
+    const userId = req.userId;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Handle profile image upload
+    const imageFile = req.file; // From multipart upload
+    let uploadedImageUrl: string | null = null;
+
+    if (imageFile) {
+      console.log('📸 Processing multipart profile image upload...');
+
+      const uploadResult = await uploadImageBuffer(
+        imageFile.buffer,
+        imageFile.originalname,
+        'assistant-profiles'
+      );
+
+      if (uploadResult.success && uploadResult.url) {
+        uploadedImageUrl = uploadResult.url;
+        console.log('✅ Profile image uploaded successfully:', uploadResult.url);
+      } else {
+        console.error('❌ Failed to upload profile image:', uploadResult.error);
+        return res.status(400).json({
+          success: false,
+          error: `Failed to upload profile image: ${uploadResult.error}`,
+        } as ApiResponse<null>);
+      }
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'No image file provided',
+      } as ApiResponse<null>);
+    }
+
+    // Update user with new profile image
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { assistantProfileImage: uploadedImageUrl },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedUser) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update assistant profile image',
+      } as ApiResponse<null>);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        assistantProfileImage: updatedUser.assistantProfileImage,
+      },
+      message: 'Assistant profile image updated successfully',
+    } as ApiResponse<{ assistantProfileImage: string | undefined }>);
+  } catch (error) {
+    console.error('Error updating assistant profile image:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
 // @route   GET /api/assistant/context
 // @desc    Get Personal Assistant context for the authenticated user
 // @access  Private
