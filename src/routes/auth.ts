@@ -6,6 +6,7 @@ import OTP from '../models/OTP';
 import { ApiResponse, AuthPayload, RegistrationRequest } from '../types';
 import { authenticateToken } from '../middleware/auth';
 import emailService from '../services/emailService';
+import smsService from '../services/smsService';
 
 const router = express.Router();
 
@@ -145,6 +146,8 @@ router.post('/register', async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -265,6 +268,8 @@ router.post('/register-enhanced', async (req, res) => {
       name: user.name, // Legacy field
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -352,6 +357,8 @@ router.post('/oauth/google', async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -441,6 +448,8 @@ router.post('/oauth/apple', async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -505,6 +514,59 @@ router.post('/login', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    // Check if 2FA is enabled
+    if (user.twoFactorAuth?.enabled) {
+      // Generate 6-digit OTP for login
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const normalizedEmail = user.email.toLowerCase().trim();
+      const method = user.twoFactorAuth.method || 'email';
+      const identifier = method === 'sms' ? user.phone! : normalizedEmail;
+
+      // Delete any existing login 2FA OTP for this user
+      await OTP.deleteMany({ identifier, type: '2fa-login' });
+
+      // Store OTP with 10-minute expiry
+      await OTP.create({
+        identifier,
+        code: otpCode,
+        type: '2fa-login',
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        attempts: 0,
+        userId: user._id.toString(),
+      });
+
+      // Send OTP via the user's preferred method
+      if (method === 'email') {
+        const emailSent = await emailService.sendPasswordResetEmail(normalizedEmail, otpCode);
+        if (!emailSent) {
+          console.warn(`Failed to send 2FA login email to ${normalizedEmail}, but OTP stored for development`);
+        }
+        console.log(`📧 2FA login code sent to ${normalizedEmail}`);
+      } else {
+        const smsSent = await smsService.send2FASMS(user.phone!, otpCode);
+        if (!smsSent && process.env.NODE_ENV !== 'development') {
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to send verification code via SMS',
+          } as ApiResponse<null>);
+        }
+        console.log(`📱 2FA login code sent to ${user.phone}`);
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          requires2FA: true,
+          email: normalizedEmail,
+          method: method,
+        },
+        message: `Verification code sent to your ${method === 'email' ? 'email' : 'phone'}`,
+        // In development, return the OTP for testing
+        ...(process.env.NODE_ENV === 'development' && { otp: otpCode }),
+      } as ApiResponse<any>);
+    }
+
+    // No 2FA - proceed with normal login
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
@@ -517,6 +579,8 @@ router.post('/login', async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -598,6 +662,8 @@ router.get('/me', authenticateToken, async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -869,6 +935,8 @@ router.post('/complete-profile', authenticateToken, async (req, res) => {
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
       assistantName: user.assistantName,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
@@ -900,8 +968,18 @@ router.post('/complete-profile', authenticateToken, async (req, res) => {
 // @access  Private
 router.post('/change-password', authenticateToken, async (req, res) => {
   try {
-    const userId = (req as any).user?.userId;
+    // Get userId from middleware - it sets req.userId directly
+    const userId = (req as any).userId;
     const { currentPassword, newPassword } = req.body;
+
+    console.log('🔐 Change password request for userId:', userId);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated',
+      } as ApiResponse<null>);
+    }
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({
@@ -919,6 +997,8 @@ router.post('/change-password', authenticateToken, async (req, res) => {
 
     // Find user
     const user = await User.findById(userId);
+    console.log('👤 User found:', user ? `Yes (${user.email})` : 'No');
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -935,10 +1015,30 @@ router.post('/change-password', authenticateToken, async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    // Hash new password and update
-    const hashedNewPassword = await bcrypt.hash(newPassword, 12);
-    user.password = hashedNewPassword;
+    // Check if new password is same as current password
+    if (newPassword === currentPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'New password must be different from current password',
+      } as ApiResponse<null>);
+    }
+
+    // Update password (pre-save hook will hash it automatically)
+    console.log('🔄 Updating password for user:', user.email);
+    console.log('📝 Password modified before save:', user.isModified('password'));
+    user.password = newPassword;
+    console.log('📝 Password modified after setting:', user.isModified('password'));
+    user.markModified('password'); // Explicitly mark as modified
+    console.log('💾 Saving user...');
     await user.save();
+    console.log('✅ User saved successfully');
+
+    // Verify the password was actually updated
+    const updatedUser = await User.findById(userId);
+    const canLoginWithNew = await bcrypt.compare(newPassword, updatedUser!.password);
+    const canLoginWithOld = await bcrypt.compare(currentPassword, updatedUser!.password);
+    console.log('🔍 Verification - Can login with new password:', canLoginWithNew);
+    console.log('🔍 Verification - Can login with old password:', canLoginWithOld);
 
     res.json({
       success: true,
@@ -1064,6 +1164,597 @@ router.post('/accept-legal', authenticateToken, async (req, res) => {
     } as ApiResponse<null>);
   } catch (error) {
     console.error('Accept legal error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// ===================================
+// Phone Verification
+// ===================================
+
+// @route   POST /api/auth/verify-phone/send
+// @desc    Send verification code to phone number
+// @access  Private
+router.post('/verify-phone/send', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { phone } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({
+        success: false,
+        error: 'Phone number is required',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Check if phone is already verified for this user
+    if (user.phone === phone && user.phoneVerified) {
+      return res.status(400).json({
+        success: false,
+        error: 'This phone number is already verified',
+      } as ApiResponse<null>);
+    }
+
+    // Generate 6-digit OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Delete any existing phone verification OTP for this user
+    await OTP.deleteMany({ identifier: phone, type: 'phone-verification' });
+
+    // Store OTP with 10-minute expiry
+    await OTP.create({
+      identifier: phone,
+      code: otpCode,
+      type: 'phone-verification',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      attempts: 0,
+      userId: userId, // Link to user for verification
+    });
+
+    // Send SMS using SMS service
+    const smsSent = await smsService.sendPhoneVerificationSMS(phone, otpCode);
+
+    if (!smsSent && process.env.NODE_ENV !== 'development') {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to send verification code',
+      } as ApiResponse<null>);
+    }
+
+    console.log(`📱 Phone verification code sent to ${phone}`);
+
+    res.json({
+      success: true,
+      message: 'Verification code sent to your phone',
+      // In development, return the OTP for testing
+      ...(process.env.NODE_ENV === 'development' && { data: { otp: otpCode } }),
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Send phone verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/verify-phone/verify
+// @desc    Verify phone OTP and mark phone as verified
+// @access  Private
+router.post('/verify-phone/verify', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { phone, code } = req.body;
+
+    if (!phone || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Phone number and verification code are required',
+      } as ApiResponse<null>);
+    }
+
+    if (code.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Get stored OTP
+    const storedOtp = await OTP.findOne({
+      identifier: phone,
+      type: 'phone-verification',
+      userId: userId,
+    });
+
+    if (!storedOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code not found or expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check if expired
+    if (new Date() > storedOtp.expiresAt) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check attempts
+    if (storedOtp.attempts >= 3) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Too many failed attempts',
+      } as ApiResponse<null>);
+    }
+
+    // Verify code
+    if (storedOtp.code !== code) {
+      storedOtp.attempts++;
+      await storedOtp.save();
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    // Mark phone as verified and update user
+    user.phone = phone;
+    user.phoneVerified = true;
+    await user.save();
+
+    // Delete the OTP
+    await OTP.deleteOne({ _id: storedOtp._id });
+
+    console.log(`✅ Phone verified for user: ${user.email}`);
+
+    res.json({
+      success: true,
+      data: {
+        phone: user.phone,
+        phoneVerified: user.phoneVerified,
+      },
+      message: 'Phone number verified successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Verify phone error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// ===================================
+// Two-Factor Authentication (2FA)
+// ===================================
+
+// @route   GET /api/auth/2fa/status
+// @desc    Get 2FA status for current user
+// @access  Private
+router.get('/2fa/status', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        enabled: user.twoFactorAuth?.enabled || false,
+        method: user.twoFactorAuth?.method || 'email',
+        verifiedAt: user.twoFactorAuth?.verifiedAt,
+      },
+      message: '2FA status retrieved successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Get 2FA status error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/2fa/setup
+// @desc    Send verification code to email or SMS to enable 2FA
+// @access  Private
+router.post('/2fa/setup', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { method } = req.body; // 'email' or 'sms'
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Check if 2FA is already enabled
+    if (user.twoFactorAuth?.enabled) {
+      return res.status(400).json({
+        success: false,
+        error: '2FA is already enabled',
+      } as ApiResponse<null>);
+    }
+
+    // Validate method
+    const selectedMethod = method || 'email';
+    if (!['email', 'sms'].includes(selectedMethod)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid 2FA method. Must be "email" or "sms"',
+      } as ApiResponse<null>);
+    }
+
+    // If SMS is selected, check if phone is verified
+    if (selectedMethod === 'sms') {
+      if (!user.phone || !user.phoneVerified) {
+        return res.status(400).json({
+          success: false,
+          error: 'You must verify your phone number before enabling SMS-based 2FA',
+        } as ApiResponse<null>);
+      }
+    }
+
+    // Generate 6-digit OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const normalizedEmail = user.email.toLowerCase().trim();
+    const identifier = selectedMethod === 'sms' ? user.phone! : normalizedEmail;
+
+    // Delete any existing 2FA OTP for this user
+    await OTP.deleteMany({ identifier, type: '2fa' });
+
+    // Store OTP with 10-minute expiry
+    await OTP.create({
+      identifier,
+      code: otpCode,
+      type: '2fa',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      attempts: 0,
+      userId: userId,
+    });
+
+    // Send OTP via selected method
+    let sent = false;
+    if (selectedMethod === 'email') {
+      sent = await emailService.sendPasswordResetEmail(normalizedEmail, otpCode);
+      if (!sent) {
+        console.warn(`Failed to send 2FA email to ${normalizedEmail}, but OTP stored for development`);
+      }
+      console.log(`📧 2FA setup code sent to ${normalizedEmail}`);
+    } else {
+      sent = await smsService.send2FASMS(user.phone!, otpCode);
+      if (!sent && process.env.NODE_ENV !== 'development') {
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to send verification code via SMS',
+        } as ApiResponse<null>);
+      }
+      console.log(`📱 2FA setup code sent to ${user.phone}`);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        method: selectedMethod,
+      },
+      message: `Verification code sent to your ${selectedMethod === 'email' ? 'email' : 'phone'}`,
+      // In development, return the OTP for testing
+      ...(process.env.NODE_ENV === 'development' && { otp: otpCode }),
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('2FA setup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/2fa/verify
+// @desc    Verify OTP code and enable 2FA
+// @access  Private
+router.post('/2fa/verify', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { code } = req.body;
+
+    if (!code || code.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    const normalizedEmail = user.email.toLowerCase().trim();
+
+    // Try to find OTP - check both email and phone identifiers
+    let storedOtp = await OTP.findOne({ identifier: normalizedEmail, type: '2fa', userId });
+    let usedMethod: 'email' | 'sms' = 'email';
+
+    if (!storedOtp && user.phone) {
+      // Check if SMS OTP exists
+      storedOtp = await OTP.findOne({ identifier: user.phone, type: '2fa', userId });
+      if (storedOtp) {
+        usedMethod = 'sms';
+      }
+    }
+
+    if (!storedOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code not found or expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check if expired
+    if (new Date() > storedOtp.expiresAt) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check attempts
+    if (storedOtp.attempts >= 3) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Too many failed attempts',
+      } as ApiResponse<null>);
+    }
+
+    // Verify code
+    if (storedOtp.code !== code) {
+      storedOtp.attempts++;
+      await storedOtp.save();
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    // Enable 2FA with the method that was used
+    user.twoFactorAuth = {
+      enabled: true,
+      method: usedMethod,
+      verifiedAt: new Date(),
+    };
+    await user.save();
+
+    // Delete the OTP
+    await OTP.deleteOne({ _id: storedOtp._id });
+
+    console.log(`✅ 2FA enabled for user: ${user.email} using ${usedMethod}`);
+
+    res.json({
+      success: true,
+      data: {
+        method: usedMethod,
+      },
+      message: 'Two-factor authentication enabled successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('2FA verify error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/2fa/disable
+// @desc    Disable 2FA (requires password confirmation)
+// @access  Private
+router.post('/2fa/disable', authenticateToken, async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        error: 'Password is required to disable 2FA',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Incorrect password',
+      } as ApiResponse<null>);
+    }
+
+    // Disable 2FA
+    user.twoFactorAuth = {
+      enabled: false,
+      method: 'email',
+      verifiedAt: undefined,
+    };
+    await user.save();
+
+    console.log(`❌ 2FA disabled for user: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Two-factor authentication disabled successfully',
+    } as ApiResponse<null>);
+  } catch (error) {
+    console.error('2FA disable error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/auth/login-2fa-verify
+// @desc    Verify 2FA code during login and return token
+// @access  Public
+router.post('/login-2fa-verify', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+
+    if (!email || !code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and verification code are required',
+      } as ApiResponse<null>);
+    }
+
+    if (code.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Find user
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    // Determine which identifier to use based on user's 2FA method
+    const method = user.twoFactorAuth?.method || 'email';
+    const identifier = method === 'sms' ? user.phone! : normalizedEmail;
+
+    // Get stored OTP
+    const storedOtp = await OTP.findOne({ identifier, type: '2fa-login' });
+
+    if (!storedOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code not found or expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check if expired
+    if (new Date() > storedOtp.expiresAt) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code expired',
+      } as ApiResponse<null>);
+    }
+
+    // Check attempts
+    if (storedOtp.attempts >= 3) {
+      await OTP.deleteOne({ _id: storedOtp._id });
+      return res.status(400).json({
+        success: false,
+        error: 'Too many failed attempts',
+      } as ApiResponse<null>);
+    }
+
+    // Verify code
+    if (storedOtp.code !== code) {
+      storedOtp.attempts++;
+      await storedOtp.save();
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid verification code',
+      } as ApiResponse<null>);
+    }
+
+    // Code verified - delete OTP
+    await OTP.deleteOne({ _id: storedOtp._id });
+
+    // Generate token
+    const token = generateToken(user._id.toString(), user.email);
+
+    // Build user response
+    const userResponse = {
+      id: user._id,
+      fullName: user.fullName,
+      preferredName: user.preferredName,
+      title: user.title,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      phoneVerified: user.phoneVerified,
+      profileImage: user.profileImage,
+      assistantName: user.assistantName,
+      assistantGender: user.assistantGender,
+      assistantVoice: user.assistantVoice,
+      assistantProfileImage: user.assistantProfileImage,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      agentConfiguration: user.agentConfiguration,
+      preferences: user.preferences,
+      integrations: user.integrations,
+      legalAcceptance: user.legalAcceptance,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+
+    console.log(`✅ 2FA login successful for user: ${user.email}`);
+
+    res.json({
+      success: true,
+      data: {
+        user: userResponse,
+        token,
+      },
+      message: 'Login successful',
+    } as ApiResponse<{ user: any; token: string }>);
+  } catch (error) {
+    console.error('2FA login verify error:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error',

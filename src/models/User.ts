@@ -195,6 +195,8 @@ const UserSchema = new Schema<any>({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password: { type: String, required: true, minlength: 6 },
   phone: { type: String, trim: true }, // Optional field - not required for registration
+  phoneVerified: { type: Boolean, default: false }, // Track if phone number is verified
+  profileImage: { type: String, trim: true }, // URL or base64 data for user's profile image
   assistantName: { type: String, trim: true },
   assistantGender: { type: String, enum: ['male', 'female', 'non-binary'], default: 'female' },
   assistantVoice: {
@@ -219,6 +221,12 @@ const UserSchema = new Schema<any>({
   // Password reset fields
   resetPasswordCode: { type: String },
   resetPasswordExpiry: { type: Date },
+  // Two-Factor Authentication
+  twoFactorAuth: {
+    enabled: { type: Boolean, default: false },
+    method: { type: String, enum: ['email', 'sms'], default: 'email' },
+    verifiedAt: { type: Date },
+  },
 }, {
   timestamps: true,
   toJSON: {
@@ -257,6 +265,8 @@ UserSchema.methods.toAuthJSON = function() {
     name: this.name, // Legacy field
     email: this.email,
     phone: this.phone,
+    phoneVerified: this.phoneVerified,
+    profileImage: this.profileImage,
     assistantName: this.assistantName,
     assistantGender: this.assistantGender,
     assistantProfileImage: this.assistantProfileImage,

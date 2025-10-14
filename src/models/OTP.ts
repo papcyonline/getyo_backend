@@ -3,9 +3,10 @@ import mongoose, { Document, Schema } from 'mongoose';
 export interface IOTP extends Document {
   identifier: string; // phone or email
   code: string;
-  type: 'phone' | 'email' | 'reset';
+  type: 'phone' | 'email' | 'reset' | '2fa' | '2fa-login' | 'phone-verification';
   attempts: number;
   expiresAt: Date;
+  userId?: string; // Optional: link OTP to specific user
   createdAt: Date;
 }
 
@@ -22,7 +23,7 @@ const OTPSchema = new Schema<IOTP>({
   type: {
     type: String,
     required: true,
-    enum: ['phone', 'email', 'reset'],
+    enum: ['phone', 'email', 'reset', '2fa', '2fa-login', 'phone-verification'],
   },
   attempts: {
     type: Number,
@@ -33,6 +34,11 @@ const OTPSchema = new Schema<IOTP>({
     required: true,
     index: true,
     expires: 0, // TTL index - delete when expiresAt is reached
+  },
+  userId: {
+    type: String,
+    required: false,
+    index: true,
   },
   createdAt: {
     type: Date,
