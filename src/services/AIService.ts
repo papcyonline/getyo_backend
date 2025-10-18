@@ -21,17 +21,30 @@ class AIService {
 3. Answering questions and providing assistance
 4. Creating summaries and extracting action items
 5. Offering productivity tips and suggestions
+6. **Accessing integrated services** (Calendar, Contacts, Location, Email, etc.) when connected
 
-Key guidelines:
+**Integration Capabilities:**
+When users have connected their services, you have access to:
+- **Calendar events** from Google Calendar, Outlook Calendar, or Apple Calendar
+- **Contacts** from their device for quick communication
+- **Location data** for navigation and location-based suggestions
+- **Email** for reading, summarizing, or composing messages
+- **And more** as they connect additional integrations
+
+**Key guidelines:**
 - Be conversational and friendly, like talking to a good friend
 - Use casual language appropriate for the user's style
-- Offer specific, actionable suggestions
+- **Use integration data naturally** - reference their actual calendar events, location, etc.
+- Offer specific, actionable suggestions based on their real data
 - Ask follow-up questions when needed
 - Extract action items from conversations when relevant
 - Keep responses concise but helpful
 - Show enthusiasm and positivity when appropriate
+- **When users ask about calendar, contacts, or other integrated data, provide specific information from the context**
 
-When users ask about their schedule, tasks, or need reminders, provide specific and helpful responses. If you detect tasks or events in the conversation, suggest adding them to their list.`;
+When users ask about their schedule, tasks, or need reminders, provide specific and helpful responses using their actual integrated data. If you detect tasks or events in the conversation, suggest adding them to their list.
+
+If users ask about data from a service they haven't connected yet, politely suggest they connect that integration for better assistance.`;
   }
 
   async generateResponse(
@@ -42,26 +55,96 @@ When users ask about their schedule, tasks, or need reminders, provide specific 
       upcomingEvents?: any[];
       pendingTasks?: any[];
       preferences?: any;
+      // Integration data
+      calendarEvents?: any[];
+      contacts?: any[];
+      location?: { latitude: number; longitude: number; address?: string };
+      emails?: any[];
+      integrations?: {
+        googleCalendar?: boolean;
+        outlookCalendar?: boolean;
+        appleCalendar?: boolean;
+        contacts?: boolean;
+        location?: boolean;
+      };
     }
   ): Promise<AIResponse> {
     try {
-      // Build context information
+      // Build context information with integration data
       let contextPrompt = '';
       if (userContext) {
         if (userContext.name) {
           contextPrompt += `The user's name is ${userContext.name}. `;
         }
 
-        if (userContext.upcomingEvents && userContext.upcomingEvents.length > 0) {
-          contextPrompt += `\nUpcoming events: ${userContext.upcomingEvents.map(e => `${e.title} at ${e.startTime}`).join(', ')}. `;
+        // Calendar events from all connected calendars
+        if (userContext.calendarEvents && userContext.calendarEvents.length > 0) {
+          const todayEvents = userContext.calendarEvents.filter(e => {
+            const eventDate = new Date(e.startTime);
+            const today = new Date();
+            return eventDate.toDateString() === today.toDateString();
+          });
+
+          const upcomingEvents = userContext.calendarEvents.filter(e => {
+            const eventDate = new Date(e.startTime);
+            const today = new Date();
+            return eventDate > today && eventDate.toDateString() !== today.toDateString();
+          });
+
+          if (todayEvents.length > 0) {
+            contextPrompt += `\n\nToday's calendar events:\n${todayEvents.map(e =>
+              `- ${e.title} at ${new Date(e.startTime).toLocaleTimeString()} ${e.location ? `(${e.location})` : ''}`
+            ).join('\n')}`;
+          }
+
+          if (upcomingEvents.length > 0) {
+            contextPrompt += `\n\nUpcoming events:\n${upcomingEvents.slice(0, 5).map(e =>
+              `- ${e.title} on ${new Date(e.startTime).toLocaleDateString()} at ${new Date(e.startTime).toLocaleTimeString()}`
+            ).join('\n')}`;
+          }
+
+          // Note which calendars are connected
+          const connectedCalendars = [];
+          if (userContext.integrations?.googleCalendar) connectedCalendars.push('Google Calendar');
+          if (userContext.integrations?.outlookCalendar) connectedCalendars.push('Outlook Calendar');
+          if (userContext.integrations?.appleCalendar) connectedCalendars.push('Apple Calendar');
+
+          if (connectedCalendars.length > 0) {
+            contextPrompt += `\n(Events synced from: ${connectedCalendars.join(', ')})`;
+          }
         }
 
+        // Pending tasks
         if (userContext.pendingTasks && userContext.pendingTasks.length > 0) {
-          contextPrompt += `\nPending tasks: ${userContext.pendingTasks.map(t => `${t.title} (${t.priority} priority)`).join(', ')}. `;
+          contextPrompt += `\n\nPending tasks:\n${userContext.pendingTasks.map(t =>
+            `- ${t.title} (${t.priority} priority${t.dueDate ? `, due ${new Date(t.dueDate).toLocaleDateString()}` : ''})`
+          ).join('\n')}`;
         }
 
+        // Location context
+        if (userContext.location) {
+          contextPrompt += `\n\nUser's current location: ${userContext.location.address || `${userContext.location.latitude}, ${userContext.location.longitude}`}`;
+        }
+
+        // Contact information (for queries like "Call John" or "Email Sarah")
+        if (userContext.contacts && userContext.contacts.length > 0) {
+          // Only include if the message mentions contacting someone
+          if (/(?:call|text|message|email|contact)\s+(\w+)/i.test(userMessage)) {
+            contextPrompt += `\n\nUser has access to contacts (device contacts connected).`;
+          }
+        }
+
+        // Email context (for queries about emails)
+        if (userContext.emails && userContext.emails.length > 0) {
+          if (/(?:email|inbox|mail|message)/i.test(userMessage)) {
+            const unreadCount = userContext.emails.filter(e => !e.isRead).length;
+            contextPrompt += `\n\nUser has ${unreadCount} unread email${unreadCount !== 1 ? 's' : ''}. Recent emails available for summary.`;
+          }
+        }
+
+        // User preferences
         if (userContext.preferences) {
-          contextPrompt += `\nUser preferences: ${userContext.preferences.conversationStyle} style, ${userContext.preferences.reminderStyle} reminders. `;
+          contextPrompt += `\n\nUser preferences: ${userContext.preferences.conversationStyle} style, ${userContext.preferences.reminderStyle} reminders.`;
         }
       }
 

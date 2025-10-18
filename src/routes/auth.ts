@@ -7,6 +7,7 @@ import { ApiResponse, AuthPayload, RegistrationRequest } from '../types';
 import { authenticateToken } from '../middleware/auth';
 import emailService from '../services/emailService';
 import smsService from '../services/smsService';
+import SessionService from '../services/SessionService';
 
 const router = express.Router();
 
@@ -569,6 +570,22 @@ router.post('/login', async (req, res) => {
     // No 2FA - proceed with normal login
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
+
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log('✅ Session created for user:', user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session:', sessionError);
+      // Don't fail login if session creation fails
+    }
 
     // Remove password from response
     const userResponse = {
@@ -1718,6 +1735,22 @@ router.post('/login-2fa-verify', async (req, res) => {
 
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
+
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log('✅ Session created for user (2FA):', user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session:', sessionError);
+      // Don't fail login if session creation fails
+    }
 
     // Build user response
     const userResponse = {

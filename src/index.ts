@@ -21,12 +21,14 @@ import LegalService from './services/LegalService';
 // Import routes
 import authRoutes from './routes/auth';
 import refreshTokenRoutes from './routes/refreshToken';
+import sessionRoutes from './routes/sessions';
 import userRoutes from './routes/users';
 import voiceRoutes from './routes/voice';
 import taskRoutes from './routes/tasks';
 import eventRoutes from './routes/events';
 import reminderRoutes from './routes/reminders';
 import noteRoutes from './routes/notes';
+import voiceNoteRoutes from './routes/voiceNotes';
 import notificationRoutes from './routes/notifications';
 import conversationRoutes from './routes/conversations';
 import aiRoutes from './routes/ai';
@@ -36,6 +38,13 @@ import agentConfigRoutes from './routes/agentConfig';
 import legalRoutes from './routes/legal';
 import transcriptionRoutes from './routes/transcription';
 import onboardingRoutes from './routes/onboarding';
+import dataManagementRoutes from './routes/dataManagement';
+import searchRoutes from './routes/search';
+import emailRoutes from './routes/email';
+import meetingRoutes from './routes/meetings';
+import googleOAuthRoutes from './routes/googleOAuth';
+import gmailRoutes from './routes/gmail';
+import googleCalendarRoutes from './routes/googleCalendar';
 
 const app = express();
 const server = http.createServer(app);
@@ -56,6 +65,9 @@ app.use(cors({
 app.use(morgan('combined'));
 app.use(express.json({ limit: '50mb' })); // Large limit for audio data
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Serve static files (audio uploads)
+app.use('/uploads', express.static('uploads'));
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -91,12 +103,15 @@ app.get('/', (req, res) => {
 // Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/auth', refreshTokenRoutes);
+app.use('/api/auth/sessions', sessionRoutes);
 app.use('/api/onboarding', onboardingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/voice', voiceRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/reminders', reminderRoutes);
+// Voice notes must be registered BEFORE regular notes to avoid route conflicts
+app.use('/api/notes/voice', voiceNoteRoutes);
 app.use('/api/notes', noteRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/conversations', conversationRoutes);
@@ -106,6 +121,13 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/agent-config', agentConfigRoutes);
 app.use('/api/legal', legalRoutes);
 app.use('/api/transcription', transcriptionRoutes);
+app.use('/api/data-management', dataManagementRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/email', emailRoutes);
+app.use('/api/meetings', meetingRoutes);
+app.use('/api/oauth/google', googleOAuthRoutes);
+app.use('/api/gmail', gmailRoutes);
+app.use('/api/google-calendar', googleCalendarRoutes);
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

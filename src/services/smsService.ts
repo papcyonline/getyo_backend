@@ -150,6 +150,100 @@ class SMSService {
     }
   }
 
+  async send2FASMS(phoneNumber: string, otpCode: string): Promise<boolean> {
+    try {
+      if (!this.client) {
+        console.log(`SMS Service disabled. 2FA OTP for ${phoneNumber}: ${otpCode}`);
+        return true;
+      }
+
+      // Validate and format phone number
+      const cleanPhone = this.formatPhoneNumber(phoneNumber);
+      if (!cleanPhone) {
+        console.error(`Invalid phone number format for 2FA: ${phoneNumber}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Invalid phone format, but logging 2FA OTP for ${phoneNumber}: ${otpCode}`);
+          return true;
+        }
+        return false;
+      }
+
+      const message = `Your Yo! two-factor authentication code is: ${otpCode}. This code will expire in 10 minutes. If you didn't request this code, please secure your account immediately.`;
+
+      const result = await this.client.messages.create({
+        body: message,
+        from: this.fromPhoneNumber,
+        to: cleanPhone,
+      });
+
+      console.log(`2FA SMS sent successfully. SID: ${result.sid}`);
+
+      // Always log OTP in development for easy access
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🔐 2FA OTP Code for ${cleanPhone}: ${otpCode}`);
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error('Failed to send 2FA SMS:', error.message);
+
+      // In development, still log the OTP even if SMS fails
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`SMS failed, but logging 2FA OTP for ${phoneNumber}: ${otpCode}`);
+        return true;
+      }
+
+      return false;
+    }
+  }
+
+  async sendPhoneVerificationSMS(phoneNumber: string, otpCode: string): Promise<boolean> {
+    try {
+      if (!this.client) {
+        console.log(`SMS Service disabled. Phone verification OTP for ${phoneNumber}: ${otpCode}`);
+        return true;
+      }
+
+      // Validate and format phone number
+      const cleanPhone = this.formatPhoneNumber(phoneNumber);
+      if (!cleanPhone) {
+        console.error(`Invalid phone number format: ${phoneNumber}`);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`Invalid phone format, but logging verification OTP for ${phoneNumber}: ${otpCode}`);
+          return true;
+        }
+        return false;
+      }
+
+      const message = `Your Yo! phone verification code is: ${otpCode}. This code will expire in 10 minutes.`;
+
+      const result = await this.client.messages.create({
+        body: message,
+        from: this.fromPhoneNumber,
+        to: cleanPhone,
+      });
+
+      console.log(`Phone verification SMS sent successfully. SID: ${result.sid}`);
+
+      // Always log OTP in development for easy access
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`🔐 Phone Verification OTP for ${cleanPhone}: ${otpCode}`);
+      }
+
+      return true;
+    } catch (error: any) {
+      console.error('Failed to send phone verification SMS:', error.message);
+
+      // In development, still log the OTP even if SMS fails
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`SMS failed, but logging phone verification OTP for ${phoneNumber}: ${otpCode}`);
+        return true;
+      }
+
+      return false;
+    }
+  }
+
   isConfigured(): boolean {
     return !!this.client;
   }

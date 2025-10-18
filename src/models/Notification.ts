@@ -8,13 +8,32 @@ export interface INotification extends Document {
   read: boolean;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   relatedId?: string; // Reference to task/event/reminder ID
-  relatedModel?: 'Task' | 'Event' | 'Reminder';
+  relatedModel?: 'Task' | 'Event' | 'Reminder' | 'Assignment';
   actionUrl?: string; // Deep link to navigate within app
   metadata?: Record<string, any>; // Additional data
   createdAt: Date;
   updatedAt: Date;
   expiresAt?: Date;
   markAsRead(): Promise<INotification>;
+}
+
+export interface INotificationModel extends mongoose.Model<INotification> {
+  getUnreadCount(userId: string): Promise<number>;
+  getRecent(userId: string, limit?: number): Promise<INotification[]>;
+  markAllAsRead(userId: string): Promise<any>;
+  deleteAllRead(userId: string): Promise<any>;
+  createNotification(data: {
+    userId: string;
+    type: string;
+    title: string;
+    message: string;
+    priority?: string;
+    relatedId?: string;
+    relatedModel?: string;
+    actionUrl?: string;
+    metadata?: Record<string, any>;
+    expiresAt?: Date;
+  }): Promise<INotification>;
 }
 
 const NotificationSchema = new Schema<INotification>({
@@ -35,7 +54,7 @@ const NotificationSchema = new Schema<INotification>({
   relatedId: { type: String },
   relatedModel: {
     type: String,
-    enum: ['Task', 'Event', 'Reminder'],
+    enum: ['Task', 'Event', 'Reminder', 'Assignment'],
   },
   actionUrl: { type: String, trim: true },
   metadata: { type: Schema.Types.Mixed },
@@ -105,4 +124,4 @@ NotificationSchema.statics.createNotification = async function(data: {
   return notification;
 };
 
-export default mongoose.model<INotification>('Notification', NotificationSchema);
+export default mongoose.model<INotification, INotificationModel>('Notification', NotificationSchema);

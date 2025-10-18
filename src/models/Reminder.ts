@@ -9,6 +9,12 @@ export interface IReminder extends Document {
   isUrgent: boolean;
   status: 'active' | 'completed' | 'snoozed' | 'cancelled';
   snoozedUntil?: Date;
+  images?: string[];
+  location?: {
+    name: string;
+    latitude: number;
+    longitude: number;
+  };
   createdAt: Date;
   updatedAt: Date;
   snooze(minutes: number): Promise<IReminder>;
@@ -32,6 +38,12 @@ const ReminderSchema = new Schema<IReminder>({
     default: 'active'
   },
   snoozedUntil: { type: Date },
+  images: [{ type: String }],
+  location: {
+    name: { type: String },
+    latitude: { type: Number },
+    longitude: { type: Number }
+  },
 }, {
   timestamps: true,
 });

@@ -245,6 +245,219 @@ router.post('/google-calendar/disconnect', async (req, res) => {
   }
 });
 
+// @route   POST /api/integrations/google-calendar/create-event
+// @desc    Create a new Google Calendar event
+// @access  Private
+router.post('/google-calendar/create-event', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { title, description, startTime, endTime, location, attendees } = req.body;
+
+    if (!title || !startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Title, start time, and end time are required',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.googleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken, calendarId } = user.integrations.googleCalendar;
+
+    if (!accessToken || !calendarId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar access token or calendar ID missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Creating Google Calendar event...');
+
+    const eventData = {
+      summary: title,
+      description: description || '',
+      location: location || '',
+      start: {
+        dateTime: new Date(startTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: new Date(endTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      attendees: attendees?.map((email: string) => ({ email })) || [],
+    };
+
+    const response = await axios.post(
+      `${GOOGLE_OAUTH_CONFIG.calendarApiUrl}/calendars/${encodeURIComponent(calendarId)}/events`,
+      eventData,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    console.log('✅ Google Calendar event created successfully');
+
+    res.json({
+      success: true,
+      data: {
+        id: response.data.id,
+        title: response.data.summary,
+        htmlLink: response.data.htmlLink,
+        startTime: response.data.start.dateTime || response.data.start.date,
+        endTime: response.data.end.dateTime || response.data.end.date,
+      },
+      message: 'Event created successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Google Calendar event creation error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to create event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   PUT /api/integrations/google-calendar/update-event/:eventId
+// @desc    Update a Google Calendar event
+// @access  Private
+router.put('/google-calendar/update-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+    const { title, description, startTime, endTime, location, attendees } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.googleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken, calendarId } = user.integrations.googleCalendar;
+
+    if (!accessToken || !calendarId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar access token or calendar ID missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Updating Google Calendar event:', eventId);
+
+    const eventData: any = {};
+    if (title) eventData.summary = title;
+    if (description !== undefined) eventData.description = description;
+    if (location !== undefined) eventData.location = location;
+    if (startTime) {
+      eventData.start = {
+        dateTime: new Date(startTime).toISOString(),
+        timeZone: 'UTC',
+      };
+    }
+    if (endTime) {
+      eventData.end = {
+        dateTime: new Date(endTime).toISOString(),
+        timeZone: 'UTC',
+      };
+    }
+    if (attendees) {
+      eventData.attendees = attendees.map((email: string) => ({ email }));
+    }
+
+    const response = await axios.patch(
+      `${GOOGLE_OAUTH_CONFIG.calendarApiUrl}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+      eventData,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    console.log('✅ Google Calendar event updated successfully');
+
+    res.json({
+      success: true,
+      data: {
+        id: response.data.id,
+        title: response.data.summary,
+        htmlLink: response.data.htmlLink,
+      },
+      message: 'Event updated successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Google Calendar event update error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to update event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   DELETE /api/integrations/google-calendar/delete-event/:eventId
+// @desc    Delete a Google Calendar event
+// @access  Private
+router.delete('/google-calendar/delete-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.googleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken, calendarId } = user.integrations.googleCalendar;
+
+    if (!accessToken || !calendarId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Calendar access token or calendar ID missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Deleting Google Calendar event:', eventId);
+
+    await axios.delete(
+      `${GOOGLE_OAUTH_CONFIG.calendarApiUrl}/calendars/${encodeURIComponent(calendarId)}/events/${eventId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    console.log('✅ Google Calendar event deleted successfully');
+
+    res.json({
+      success: true,
+      data: { eventId },
+      message: 'Event deleted successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Google Calendar event deletion error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to delete event',
+    } as ApiResponse<null>);
+  }
+});
+
 // @route   GET /api/integrations/google-calendar/events
 // @desc    Fetch real Google Calendar events from Google Calendar API
 // @access  Private
@@ -341,6 +554,488 @@ router.get('/google-calendar/events', async (req, res) => {
   }
 });
 
+// ============================================================================
+// OUTLOOK CALENDAR ENDPOINTS
+// ============================================================================
+
+// Outlook OAuth2 Configuration
+const OUTLOOK_CALENDAR_CONFIG = {
+  clientId: process.env.OUTLOOK_CLIENT_ID || 'your-outlook-client-id',
+  clientSecret: process.env.OUTLOOK_CLIENT_SECRET || 'your-outlook-client-secret',
+  tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+  graphApiUrl: 'https://graph.microsoft.com/v1.0',
+  redirectUri: process.env.OUTLOOK_REDIRECT_URI || 'exp://localhost:8081',
+  scopes: [
+    'https://graph.microsoft.com/Calendars.ReadWrite',
+    'https://graph.microsoft.com/User.Read',
+    'offline_access',
+  ],
+};
+
+// @route   POST /api/integrations/outlook-calendar/connect
+// @desc    Connect Outlook Calendar with OAuth2
+// @access  Private
+router.post('/outlook-calendar/connect', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { code } = req.body;
+
+    if (!code) {
+      return res.status(400).json({
+        success: false,
+        error: 'Authorization code is required',
+      } as ApiResponse<null>);
+    }
+
+    console.log('🔐 Exchanging Outlook Calendar OAuth code for tokens for user:', userId);
+
+    // Exchange code for tokens
+    const tokenResponse = await axios.post(
+      OUTLOOK_CALENDAR_CONFIG.tokenUrl,
+      new URLSearchParams({
+        client_id: OUTLOOK_CALENDAR_CONFIG.clientId,
+        client_secret: OUTLOOK_CALENDAR_CONFIG.clientSecret,
+        code: code,
+        redirect_uri: OUTLOOK_CALENDAR_CONFIG.redirectUri,
+        grant_type: 'authorization_code',
+      }),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
+
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
+
+    if (!access_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to obtain access token',
+      } as ApiResponse<null>);
+    }
+
+    // Get user info from Microsoft Graph
+    const userInfoResponse = await axios.get(`${OUTLOOK_CALENDAR_CONFIG.graphApiUrl}/me`, {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+      },
+    });
+
+    // Update user's integrations
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          'integrations.outlookCalendar': {
+            connected: true,
+            accessToken: access_token,
+            refreshToken: refresh_token,
+            expiresAt: expires_in ? new Date(Date.now() + expires_in * 1000) : undefined,
+            connectedAt: new Date(),
+            email: userInfoResponse.data.mail || userInfoResponse.data.userPrincipalName,
+            name: userInfoResponse.data.displayName,
+          },
+        },
+      },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    console.log('✅ Outlook Calendar connected successfully for user:', userId);
+
+    res.json({
+      success: true,
+      data: {
+        connected: true,
+        provider: 'outlook',
+        connectedAt: user.integrations?.outlookCalendar?.connectedAt,
+        email: userInfoResponse.data.mail || userInfoResponse.data.userPrincipalName,
+      },
+      message: 'Outlook Calendar connected successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Outlook Calendar connection error:', error.response?.data || error);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error_description || 'Failed to connect Outlook Calendar',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/integrations/outlook-calendar/disconnect
+// @desc    Disconnect Outlook Calendar
+// @access  Private
+router.post('/outlook-calendar/disconnect', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          'integrations.outlookCalendar': {
+            connected: false,
+          },
+        },
+      },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        connected: false,
+        provider: 'outlook',
+      },
+      message: 'Outlook Calendar disconnected successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Outlook Calendar disconnection error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to disconnect Outlook Calendar',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/integrations/outlook-calendar/create-event
+// @desc    Create a new Outlook Calendar event
+// @access  Private
+router.post('/outlook-calendar/create-event', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { title, description, startTime, endTime, location, attendees } = req.body;
+
+    if (!title || !startTime || !endTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Title, start time, and end time are required',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.outlookCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken } = user.integrations.outlookCalendar;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar access token missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Creating Outlook Calendar event...');
+
+    const eventData = {
+      subject: title,
+      body: {
+        contentType: 'HTML',
+        content: description || '',
+      },
+      start: {
+        dateTime: new Date(startTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      end: {
+        dateTime: new Date(endTime).toISOString(),
+        timeZone: 'UTC',
+      },
+      location: {
+        displayName: location || '',
+      },
+      attendees: attendees?.map((email: string) => ({
+        emailAddress: { address: email },
+        type: 'required',
+      })) || [],
+    };
+
+    const response = await axios.post(
+      `${OUTLOOK_CALENDAR_CONFIG.graphApiUrl}/me/events`,
+      eventData,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    console.log('✅ Outlook Calendar event created successfully');
+
+    res.json({
+      success: true,
+      data: {
+        id: response.data.id,
+        title: response.data.subject,
+        webLink: response.data.webLink,
+        startTime: response.data.start.dateTime,
+        endTime: response.data.end.dateTime,
+      },
+      message: 'Event created successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Outlook Calendar event creation error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to create event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   PUT /api/integrations/outlook-calendar/update-event/:eventId
+// @desc    Update an Outlook Calendar event
+// @access  Private
+router.patch('/outlook-calendar/update-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+    const { title, description, startTime, endTime, location, attendees } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.outlookCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken } = user.integrations.outlookCalendar;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar access token missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Updating Outlook Calendar event:', eventId);
+
+    const eventData: any = {};
+    if (title) eventData.subject = title;
+    if (description !== undefined) {
+      eventData.body = {
+        contentType: 'HTML',
+        content: description,
+      };
+    }
+    if (location !== undefined) {
+      eventData.location = { displayName: location };
+    }
+    if (startTime) {
+      eventData.start = {
+        dateTime: new Date(startTime).toISOString(),
+        timeZone: 'UTC',
+      };
+    }
+    if (endTime) {
+      eventData.end = {
+        dateTime: new Date(endTime).toISOString(),
+        timeZone: 'UTC',
+      };
+    }
+    if (attendees) {
+      eventData.attendees = attendees.map((email: string) => ({
+        emailAddress: { address: email },
+        type: 'required',
+      }));
+    }
+
+    const response = await axios.patch(
+      `${OUTLOOK_CALENDAR_CONFIG.graphApiUrl}/me/events/${eventId}`,
+      eventData,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    console.log('✅ Outlook Calendar event updated successfully');
+
+    res.json({
+      success: true,
+      data: {
+        id: response.data.id,
+        title: response.data.subject,
+        webLink: response.data.webLink,
+      },
+      message: 'Event updated successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Outlook Calendar event update error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to update event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   DELETE /api/integrations/outlook-calendar/delete-event/:eventId
+// @desc    Delete an Outlook Calendar event
+// @access  Private
+router.delete('/outlook-calendar/delete-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.outlookCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken } = user.integrations.outlookCalendar;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar access token missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Deleting Outlook Calendar event:', eventId);
+
+    await axios.delete(
+      `${OUTLOOK_CALENDAR_CONFIG.graphApiUrl}/me/events/${eventId}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    console.log('✅ Outlook Calendar event deleted successfully');
+
+    res.json({
+      success: true,
+      data: { eventId },
+      message: 'Event deleted successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Outlook Calendar event deletion error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: error.response?.data?.error?.message || 'Failed to delete event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   GET /api/integrations/outlook-calendar/events
+// @desc    Fetch Outlook Calendar events from Microsoft Graph API
+// @access  Private
+router.get('/outlook-calendar/events', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { startDate, endDate, maxResults = 50 } = req.query;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.outlookCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    const { accessToken } = user.integrations.outlookCalendar;
+
+    if (!accessToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Outlook Calendar access token missing',
+      } as ApiResponse<null>);
+    }
+
+    console.log('📅 Fetching Outlook Calendar events...');
+
+    // Build query parameters
+    let queryString = `?$top=${maxResults}&$orderby=start/dateTime`;
+
+    if (startDate && endDate) {
+      const start = new Date(startDate as string).toISOString();
+      const end = new Date(endDate as string).toISOString();
+      queryString += `&$filter=start/dateTime ge '${start}' and end/dateTime le '${end}'`;
+    }
+
+    // Fetch events from Microsoft Graph API
+    const response = await axios.get(
+      `${OUTLOOK_CALENDAR_CONFIG.graphApiUrl}/me/events${queryString}`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    const events = response.data.value?.map((event: any) => ({
+      id: event.id,
+      title: event.subject,
+      description: event.bodyPreview,
+      startTime: event.start?.dateTime,
+      endTime: event.end?.dateTime,
+      location: event.location?.displayName,
+      attendees: event.attendees?.map((attendee: any) => attendee.emailAddress?.address) || [],
+      status: event.isCancelled ? 'cancelled' : 'confirmed',
+      isOnline: event.isOnlineMeeting,
+      onlineMeetingUrl: event.onlineMeetingUrl,
+    })) || [];
+
+    console.log(`✅ Successfully fetched ${events.length} Outlook Calendar events`);
+
+    res.json({
+      success: true,
+      data: {
+        events: events,
+        totalCount: events.length,
+        synced: true,
+        lastSyncAt: new Date().toISOString(),
+      },
+      message: 'Outlook Calendar events fetched successfully',
+    } as ApiResponse<any>);
+  } catch (error: any) {
+    console.error('❌ Outlook Calendar events fetch error:', error.response?.data || error.message);
+
+    if (error.response?.status === 401) {
+      res.status(401).json({
+        success: false,
+        error: 'Outlook Calendar access token expired',
+        code: 'TOKEN_EXPIRED',
+      } as ApiResponse<null>);
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch Outlook Calendar events',
+      } as ApiResponse<null>);
+    }
+  }
+});
+
+// ============================================================================
+// APPLE CALENDAR ENDPOINTS
+// ============================================================================
+
 // @route   POST /api/integrations/apple-calendar/connect
 // @desc    Connect Apple Calendar using system EventKit integration
 // @access  Private
@@ -408,6 +1103,152 @@ router.post('/apple-calendar/connect', async (req, res) => {
   }
 });
 
+// @route   GET /api/integrations/apple-calendar/events
+// @desc    Get Apple Calendar events (device-side only)
+// @access  Private
+router.get('/apple-calendar/events', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.appleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Apple Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    // For Apple Calendar, events are fetched on the device using EventKit
+    // This endpoint just confirms connection status
+    res.json({
+      success: true,
+      data: {
+        connected: true,
+        message: 'Events are fetched from device calendar using EventKit',
+      },
+      message: 'Apple Calendar events are managed on device',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Apple Calendar events error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to check Apple Calendar status',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   POST /api/integrations/apple-calendar/create-event
+// @desc    Create Apple Calendar event (device-side)
+// @access  Private
+router.post('/apple-calendar/create-event', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId, title } = req.body;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.appleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Apple Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    // For Apple Calendar, events are created on the device using EventKit
+    // This endpoint acknowledges the event was created
+    console.log('📅 Apple Calendar event created on device:', eventId);
+
+    res.json({
+      success: true,
+      data: {
+        eventId,
+        title,
+        message: 'Event created on device using EventKit',
+      },
+      message: 'Event created successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Apple Calendar create event error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create Apple Calendar event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   PUT /api/integrations/apple-calendar/update-event/:eventId
+// @desc    Update Apple Calendar event (device-side)
+// @access  Private
+router.put('/apple-calendar/update-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.appleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Apple Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    // For Apple Calendar, events are updated on the device using EventKit
+    // This endpoint acknowledges the event was updated
+    console.log('📅 Apple Calendar event updated on device:', eventId);
+
+    res.json({
+      success: true,
+      data: {
+        eventId,
+        message: 'Event updated on device using EventKit',
+      },
+      message: 'Event updated successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Apple Calendar update event error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update Apple Calendar event',
+    } as ApiResponse<null>);
+  }
+});
+
+// @route   DELETE /api/integrations/apple-calendar/delete-event/:eventId
+// @desc    Delete Apple Calendar event (device-side)
+// @access  Private
+router.delete('/apple-calendar/delete-event/:eventId', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const { eventId } = req.params;
+
+    const user = await User.findById(userId);
+    if (!user || !user.integrations?.appleCalendar?.connected) {
+      return res.status(400).json({
+        success: false,
+        error: 'Apple Calendar not connected',
+      } as ApiResponse<null>);
+    }
+
+    // For Apple Calendar, events are deleted on the device using EventKit
+    // This endpoint acknowledges the event was deleted
+    console.log('📅 Apple Calendar event deleted on device:', eventId);
+
+    res.json({
+      success: true,
+      data: {
+        eventId,
+        message: 'Event deleted on device using EventKit',
+      },
+      message: 'Event deleted successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Apple Calendar delete event error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete Apple Calendar event',
+    } as ApiResponse<null>);
+  }
+});
+
 // @route   POST /api/integrations/apple-calendar/disconnect
 // @desc    Disconnect Apple Calendar
 // @access  Private
@@ -471,6 +1312,10 @@ router.get('/status', async (req, res) => {
       googleCalendar: {
         connected: user.integrations?.googleCalendar?.connected || false,
         connectedAt: user.integrations?.googleCalendar?.connectedAt || null,
+      },
+      outlookCalendar: {
+        connected: user.integrations?.outlookCalendar?.connected || false,
+        connectedAt: user.integrations?.outlookCalendar?.connectedAt || null,
       },
       appleCalendar: {
         connected: user.integrations?.appleCalendar?.connected || false,

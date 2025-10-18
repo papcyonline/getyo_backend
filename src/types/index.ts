@@ -48,19 +48,81 @@ export interface UserIntegrations {
   };
 }
 
+// Subtask interface
+export interface ISubtask {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+}
+
+// Reminder interface
+export interface IReminder {
+  id: string;
+  dateTime: Date;
+  type: 'once' | 'daily' | 'weekly' | 'monthly';
+  enabled: boolean;
+}
+
+// Recurrence interface
+export interface IRecurrence {
+  enabled: boolean;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  interval: number; // e.g., every 2 weeks = interval: 2, frequency: 'weekly'
+  endDate?: Date;
+  daysOfWeek?: string[]; // ['monday', 'wednesday', 'friday'] for weekly
+  dayOfMonth?: number; // For monthly recurrence
+}
+
+// Location interface
+export interface ILocation {
+  name: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+}
+
 export interface ITask extends Document {
   _id: string;
   userId: string;
   title: string;
   description?: string;
-  priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'in_progress' | 'completed';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: 'pending' | 'in-progress' | 'completed' | 'cancelled';
+  category?: string;
+  tags?: string[];
+
+  // Date & Time
   dueDate?: Date;
-  reminders: Date[];
-  tags: string[];
-  createdBy: 'user' | 'ai_suggestion';
+  completedAt?: Date;
+  reminders?: IReminder[];
+  recurrence?: IRecurrence;
+
+  // Media
+  images?: string[]; // URLs to images
+  location?: ILocation;
+
+  // Voice Recording (if task was created via voice)
+  audioUrl?: string;
+  transcript?: string;
+  audioDuration?: number; // in seconds
+
+  // Organization
+  subtasks?: ISubtask[];
+
+  // Metadata
+  createdBy: 'user' | 'ai' | 'voice';
   createdAt: Date;
   updatedAt: Date;
+
+  // Methods
+  markCompleted(): Promise<ITask>;
+  addSubtask(text: string): Promise<ITask>;
+  toggleSubtask(subtaskId: string): Promise<ITask>;
+
+  // Virtuals
+  progress: number;
+  isOverdue: boolean;
 }
 
 export interface IEvent extends Document {

@@ -1,13 +1,15 @@
 import fs from 'fs';
-import FormData from 'form-data';
+import OpenAI from 'openai';
 
 export class TranscriptionService {
-  private openaiApiKey: string;
+  private openai: OpenAI | null = null;
 
   constructor() {
-    this.openaiApiKey = process.env.OPENAI_API_KEY || '';
-    if (!this.openaiApiKey) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
       console.warn('⚠️ OpenAI API key not found. Transcription will use fallback responses.');
+    } else {
+      this.openai = new OpenAI({ apiKey });
     }
   }
 
@@ -21,122 +23,52 @@ export class TranscriptionService {
     language?: string;
   } | null> {
     try {
-      if (!this.openaiApiKey) {
-        console.log('No OpenAI API key, returning mock transcription');
-        return this.getMockTranscription();
+      if (!this.openai) {
+        throw new Error('OpenAI client not initialized. Please set OPENAI_API_KEY in environment variables.');
       }
 
       console.log('🎤 Transcribing audio with OpenAI Whisper...');
+      console.log('📁 Audio file path:', audioFilePath);
 
-      const formData = new FormData();
-      formData.append('file', fs.createReadStream(audioFilePath));
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'en');
-      formData.append('response_format', 'verbose_json');
-      formData.append('temperature', '0.2'); // Lower temperature for more accurate transcription
-
-      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.openaiApiKey}`,
-          ...formData.getHeaders(),
-        },
-        body: formData,
+      // Use OpenAI SDK to transcribe
+      const transcription = await this.openai.audio.transcriptions.create({
+        file: fs.createReadStream(audioFilePath),
+        model: 'whisper-1',
+        language: 'en',
+        response_format: 'verbose_json',
+        temperature: 0.2,
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('OpenAI API error:', response.status, errorText);
-        return this.getMockTranscription();
-      }
-
-      const result = await response.json() as any;
-      console.log('✅ Whisper transcription successful:', result.text);
+      console.log('✅ Whisper transcription successful:', transcription.text);
 
       return {
-        text: result.text || '',
-        confidence: this.calculateConfidence(result),
-        duration: result.duration,
-        language: result.language || 'en',
+        text: transcription.text || '',
+        confidence: this.calculateConfidence(transcription),
+        duration: transcription.duration,
+        language: transcription.language || 'en',
       };
-    } catch (error) {
-      console.error('Whisper transcription error:', error);
-      return this.getMockTranscription();
+    } catch (error: any) {
+      console.error('❌ Whisper transcription error:', error.message);
+      console.error('Error details:', error);
+      throw error;
     }
   }
 
   /**
-   * Alternative: Transcribe using VAPI.AI (if you prefer their voice-optimized engine)
-   */
-  async transcribeWithVAPI(audioFilePath: string): Promise<{
-    text: string;
-    confidence: number;
-  } | null> {
-    try {
-      const vapiApiKey = process.env.VAPI_API_KEY;
-      if (!vapiApiKey) {
-        console.log('No VAPI API key, falling back to Whisper');
-        return this.transcribeWithWhisper(audioFilePath);
-      }
-
-      console.log('🎤 Transcribing audio with VAPI.AI...');
-
-      const formData = new FormData();
-      formData.append('audio', fs.createReadStream(audioFilePath));
-      formData.append('language', 'en');
-
-      const response = await fetch('https://api.vapi.ai/transcribe', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${vapiApiKey}`,
-          ...formData.getHeaders(),
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        console.error('VAPI API error:', response.status);
-        return this.transcribeWithWhisper(audioFilePath);
-      }
-
-      const result = await response.json() as any;
-      console.log('✅ VAPI transcription successful:', result.text);
-
-      return {
-        text: result.text || result.transcript || '',
-        confidence: result.confidence || 0.9,
-      };
-    } catch (error) {
-      console.error('VAPI transcription error:', error);
-      return this.transcribeWithWhisper(audioFilePath);
-    }
-  }
-
-  /**
-   * Smart transcription - tries OpenAI Whisper first, falls back to mock
+   * Transcribe audio using OpenAI Whisper
    */
   async transcribe(audioFilePath: string, preferredService: 'whisper' | 'vapi' = 'whisper'): Promise<{
     text: string;
     confidence: number;
     service: string;
   }> {
-    let result = null;
+    const result = await this.transcribeWithWhisper(audioFilePath);
 
-    if (preferredService === 'vapi') {
-      result = await this.transcribeWithVAPI(audioFilePath);
-      if (result) {
-        return { ...result, service: 'vapi' };
-      }
+    if (!result) {
+      throw new Error('Transcription failed - no result returned from Whisper API');
     }
 
-    result = await this.transcribeWithWhisper(audioFilePath);
-    if (result) {
-      return { ...result, service: 'whisper' };
-    }
-
-    // Final fallback
-    const mockResult = this.getMockTranscription();
-    return { ...mockResult, service: 'mock' };
+    return { ...result, service: 'whisper' };
   }
 
   /**
@@ -159,25 +91,88 @@ export class TranscriptionService {
   }
 
   /**
-   * Realistic mock transcriptions for conversation interview
+   * Generate a smart title from transcript using AI
    */
-  private getMockTranscription(): { text: string; confidence: number } {
-    const mockResponses = [
-      { text: "I'm a software engineer working on mobile applications and AI integration projects.", confidence: 0.95 },
-      { text: "My biggest challenge is managing multiple projects and staying organized with deadlines.", confidence: 0.92 },
-      { text: "I prefer having a structured day but with flexibility for unexpected urgent tasks.", confidence: 0.88 },
-      { text: "I'd like reminders to be friendly but professional, not too casual.", confidence: 0.94 },
-      { text: "I usually work from 9 to 6 but sometimes need to work late on important projects.", confidence: 0.90 },
-      { text: "I want my assistant to help with scheduling meetings and managing my calendar efficiently.", confidence: 0.93 },
-      { text: "I prefer getting daily briefings in the morning around 8 AM before I start work.", confidence: 0.91 },
-      { text: "I'd like the assistant to learn my preferences over time and become more personalized.", confidence: 0.89 },
-      { text: "Email management takes up too much of my time. I need help organizing my inbox.", confidence: 0.87 },
-      { text: "I'm most productive in the morning and prefer tackling complex tasks early in the day.", confidence: 0.93 },
-      { text: "I work with international teams so I need reminders that consider different time zones.", confidence: 0.91 },
-      { text: "I like to batch similar tasks together rather than constantly switching between different types of work.", confidence: 0.89 }
-    ];
+  async generateTitle(transcript: string): Promise<string> {
+    try {
+      if (!this.openai) {
+        // Fallback: Simple title generation without AI
+        return this.generateSimpleTitle(transcript);
+      }
 
-    return mockResponses[Math.floor(Math.random() * mockResponses.length)];
+      console.log('🤖 Generating smart title with AI...');
+
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that creates concise, descriptive titles for voice recordings. Create a short title (max 60 characters) that captures the main topic. Do not include greetings, filler words, or meta information. Focus on the key subject matter. Examples: "Meeting with board members about Q4", "Call with Google CEO", "Reminder to buy groceries", "Discussion about project timeline".'
+          },
+          {
+            role: 'user',
+            content: `Create a concise title for this transcript:\n\n${transcript}`
+          }
+        ],
+        max_tokens: 30,
+        temperature: 0.3,
+      });
+
+      const title = completion.choices[0]?.message?.content?.trim() || this.generateSimpleTitle(transcript);
+
+      // Remove quotes if AI added them
+      const cleanTitle = title.replace(/^["']|["']$/g, '');
+
+      console.log('✅ AI generated title:', cleanTitle);
+      return cleanTitle;
+
+    } catch (error: any) {
+      console.error('❌ AI title generation error:', error.message);
+      return this.generateSimpleTitle(transcript);
+    }
+  }
+
+  /**
+   * Simple fallback title generation without AI
+   */
+  private generateSimpleTitle(text: string): string {
+    // Remove greetings and common filler words
+    const cleaned = text
+      .replace(/^(hello|hi|hey|good morning|good afternoon|good evening)[,\s]*/i, '')
+      .replace(/\b(um|uh|like|you know|so|well)\b/gi, '')
+      .trim();
+
+    // Try to extract key phrases
+    const meetingMatch = cleaned.match(/meeting (with|about|regarding) ([^,.!?]+)/i);
+    if (meetingMatch) {
+      return `Meeting ${meetingMatch[1]} ${meetingMatch[2]}`.substring(0, 60);
+    }
+
+    const callMatch = cleaned.match(/call (with|about|regarding) ([^,.!?]+)/i);
+    if (callMatch) {
+      return `Call ${callMatch[1]} ${callMatch[2]}`.substring(0, 60);
+    }
+
+    const reminderMatch = cleaned.match(/remind(er)? (me )?(to|about) ([^,.!?]+)/i);
+    if (reminderMatch) {
+      return `Reminder: ${reminderMatch[4]}`.substring(0, 60);
+    }
+
+    // Get first sentence or first 50 characters
+    const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+    if (firstSentence.length <= 60) {
+      return firstSentence;
+    }
+
+    // Take first 50 chars
+    const words = cleaned.split(' ');
+    let title = '';
+    for (const word of words) {
+      if ((title + word).length > 50) break;
+      title += (title ? ' ' : '') + word;
+    }
+
+    return title + (title.length < cleaned.length ? '...' : '');
   }
 
   /**
@@ -190,9 +185,9 @@ export class TranscriptionService {
     hasVAPIKey: boolean;
   }> {
     return {
-      whisper: !!this.openaiApiKey,
+      whisper: !!this.openai,
       vapi: !!process.env.VAPI_API_KEY,
-      hasOpenAIKey: !!this.openaiApiKey,
+      hasOpenAIKey: !!this.openai,
       hasVAPIKey: !!process.env.VAPI_API_KEY,
     };
   }

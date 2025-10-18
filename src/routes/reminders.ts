@@ -7,6 +7,9 @@ const router = Router();
 // All reminder routes require authentication
 router.use(authenticateToken);
 
+// AI-powered extraction
+router.post('/extract-from-voice', reminderController.extractReminderFromVoice);
+
 // Reminder CRUD operations
 router.get('/', reminderController.getReminders);
 router.get('/upcoming', reminderController.getUpcomingReminders);

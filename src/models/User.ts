@@ -147,6 +147,25 @@ const UserPreferencesSchema = new Schema({
 }, { _id: false });
 
 const UserIntegrationsSchema = new Schema({
+  // Google Services - Single OAuth for all Google services
+  google: {
+    connected: { type: Boolean, default: false },
+    email: { type: String }, // Google account email
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    scope: { type: String }, // Granted scopes
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    // Service-specific settings
+    services: {
+      gmail: { type: Boolean, default: false },
+      calendar: { type: Boolean, default: false },
+      drive: { type: Boolean, default: false },
+      meet: { type: Boolean, default: false },
+      contacts: { type: Boolean, default: false },
+    },
+  },
   googleCalendar: {
     connected: { type: Boolean, default: false },
     accessToken: { type: String },
@@ -161,6 +180,18 @@ const UserIntegrationsSchema = new Schema({
     calendarSource: { type: String },
     permissionGranted: { type: Boolean, default: false },
   },
+  emailAccounts: [{
+    id: { type: String, required: true },
+    provider: { type: String, enum: ['gmail', 'outlook'], required: true },
+    email: { type: String, required: true },
+    name: { type: String },
+    accessToken: { type: String, required: true },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date, default: Date.now },
+    lastSyncedAt: { type: Date },
+    isDefault: { type: Boolean, default: false },
+  }],
 }, { _id: false });
 
 // Legal Acceptance Schema for Terms & Privacy tracking
