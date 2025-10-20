@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { optimizeDatabaseIndexes } from './databaseIndexOptimization';
 
 class DatabaseConnection {
   private static instance: DatabaseConnection;
@@ -39,6 +40,10 @@ class DatabaseConnection {
 
       this.isConnected = true;
       console.log(`Connected to MongoDB: ${mongoUri}`);
+
+      // Optimize database indexes (runs once on startup)
+      console.log('Optimizing database indexes...');
+      await optimizeDatabaseIndexes();
 
       // Handle connection events
       mongoose.connection.on('error', (error) => {

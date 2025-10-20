@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 import fs from 'fs';
+import { User } from '../models';
+import generateAdvancedSystemPrompt from '../prompts/advancedPASystemPrompt';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -34,10 +36,39 @@ export class OpenAIService {
     assistantName?: string
   ): Promise<ChatResponse> {
     try {
-      // Add system context for personal assistant
+      // Fetch user info for personalization
+      const user = await User.findById(userId);
+      const userName = user?.preferredName || user?.fullName;
+
+      console.log('🔍 [OpenAI Service] User Info:', {
+        userId,
+        fullName: user?.fullName,
+        preferredName: user?.preferredName,
+        userName: userName,
+        assistantName: assistantName
+      });
+
+      // Detect if this is a greeting
+      const lastUserMessage = messages[messages.length - 1]?.content?.toLowerCase() || '';
+      const isGreeting = /^(hi|hello|hey|greetings|good morning|good afternoon|good evening|yo|sup|what's up|whats up)/i.test(lastUserMessage.trim());
+
+      console.log('🔍 [OpenAI Service] Greeting Detection:', {
+        lastUserMessage: lastUserMessage.substring(0, 50),
+        isGreeting,
+        conversationPhase: isGreeting ? 'greeting' : 'task'
+      });
+
+      // Use advanced system prompt with user context
+      const systemPromptContent = generateAdvancedSystemPrompt({
+        assistantName: assistantName || 'Yo!',
+        userName: userName,
+        conversationPhase: isGreeting ? 'greeting' : 'task',
+        userMood: 'neutral'
+      });
+      
       const systemMessage: ChatMessage = {
         role: 'system',
-        content: `You are ${assistantName || 'Yo!'}, a helpful personal assistant. You are professional, friendly, and concise. Help the user with their requests efficiently. Keep responses conversational but informative.`
+        content: systemPromptContent
       };
 
       const completion = await openai.chat.completions.create({

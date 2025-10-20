@@ -147,6 +147,9 @@ const UserPreferencesSchema = new Schema({
 }, { _id: false });
 
 const UserIntegrationsSchema = new Schema({
+  // ============================================================================
+  // GOOGLE SERVICES
+  // ============================================================================
   // Google Services - Single OAuth for all Google services
   google: {
     connected: { type: Boolean, default: false },
@@ -164,6 +167,8 @@ const UserIntegrationsSchema = new Schema({
       drive: { type: Boolean, default: false },
       meet: { type: Boolean, default: false },
       contacts: { type: Boolean, default: false },
+      photos: { type: Boolean, default: false },
+      maps: { type: Boolean, default: false },
     },
   },
   googleCalendar: {
@@ -174,15 +179,207 @@ const UserIntegrationsSchema = new Schema({
     calendarId: { type: String },
     connectedAt: { type: Date },
   },
+
+  // ============================================================================
+  // MICROSOFT SERVICES
+  // ============================================================================
+  microsoft: {
+    connected: { type: Boolean, default: false },
+    email: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    scope: { type: String },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    services: {
+      outlook: { type: Boolean, default: false },
+      calendar: { type: Boolean, default: false },
+      oneDrive: { type: Boolean, default: false },
+      teams: { type: Boolean, default: false },
+      contacts: { type: Boolean, default: false },
+      todo: { type: Boolean, default: false },
+    },
+  },
+  outlookCalendar: {
+    connected: { type: Boolean, default: false },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    email: { type: String },
+    name: { type: String },
+    connectedAt: { type: Date },
+  },
+
+  // ============================================================================
+  // APPLE SERVICES (Device-Level)
+  // ============================================================================
   appleCalendar: {
     connected: { type: Boolean, default: false },
     connectedAt: { type: Date },
     calendarSource: { type: String },
     permissionGranted: { type: Boolean, default: false },
   },
+
+  // ============================================================================
+  // SOCIAL MEDIA INTEGRATIONS
+  // ============================================================================
+  twitter: {
+    connected: { type: Boolean, default: false },
+    username: { type: String },
+    userId: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] }, // ['read', 'write', 'dm']
+  },
+  linkedin: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    name: { type: String },
+    email: { type: String },
+    profileUrl: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] },
+  },
+  facebook: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    name: { type: String },
+    email: { type: String },
+    accessToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] },
+  },
+  instagram: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    username: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] },
+  },
+
+  // ============================================================================
+  // COMMUNICATION PLATFORMS
+  // ============================================================================
+  slack: {
+    connected: { type: Boolean, default: false },
+    teamId: { type: String },
+    teamName: { type: String },
+    userId: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    botAccessToken: { type: String },
+    webhookUrl: { type: String },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] },
+  },
+  discord: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    username: { type: String },
+    discriminator: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    guilds: [{ type: String }], // Server IDs
+  },
+  teams: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+  },
+  zoom: {
+    connected: { type: Boolean, default: false },
+    userId: { type: String },
+    email: { type: String },
+    accessToken: { type: String },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date },
+    lastSyncedAt: { type: Date },
+    permissions: { type: [String], default: [] },
+  },
+
+  // ============================================================================
+  // DEVICE INTEGRATIONS (Permissions-based)
+  // ============================================================================
+  device: {
+    // Contacts
+    contacts: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+      lastSyncedAt: { type: Date },
+      totalContacts: { type: Number, default: 0 },
+    },
+    // Location
+    location: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+      trackingMode: { type: String, enum: ['always', 'whenInUse', 'never'], default: 'never' },
+      lastKnownLocation: {
+        latitude: { type: Number },
+        longitude: { type: Number },
+        timestamp: { type: Date },
+        accuracy: { type: Number },
+      },
+    },
+    // Photos/Media
+    photos: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+      lastSyncedAt: { type: Date },
+      totalPhotos: { type: Number, default: 0 },
+    },
+    // Calendar (Native)
+    calendar: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+      lastSyncedAt: { type: Date },
+      totalEvents: { type: Number, default: 0 },
+    },
+    // Microphone
+    microphone: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+    },
+    // Camera
+    camera: {
+      enabled: { type: Boolean, default: false },
+      permissionGranted: { type: Boolean, default: false },
+    },
+    // Notifications
+    notifications: {
+      enabled: { type: Boolean, default: true },
+      permissionGranted: { type: Boolean, default: false },
+    },
+  },
+
+  // ============================================================================
+  // EMAIL ACCOUNTS (Multi-provider support)
+  // ============================================================================
   emailAccounts: [{
     id: { type: String, required: true },
-    provider: { type: String, enum: ['gmail', 'outlook'], required: true },
+    provider: { type: String, enum: ['gmail', 'outlook', 'icloud', 'yahoo', 'custom'], required: true },
     email: { type: String, required: true },
     name: { type: String },
     accessToken: { type: String, required: true },
@@ -191,6 +388,32 @@ const UserIntegrationsSchema = new Schema({
     connectedAt: { type: Date, default: Date.now },
     lastSyncedAt: { type: Date },
     isDefault: { type: Boolean, default: false },
+    // Email stats
+    stats: {
+      totalEmails: { type: Number, default: 0 },
+      unreadCount: { type: Number, default: 0 },
+      lastEmailAt: { type: Date },
+    },
+  }],
+
+  // ============================================================================
+  // CLOUD STORAGE
+  // ============================================================================
+  cloudStorage: [{
+    id: { type: String, required: true },
+    provider: { type: String, enum: ['google_drive', 'onedrive', 'dropbox', 'icloud', 'box'], required: true },
+    email: { type: String },
+    accessToken: { type: String, required: true },
+    refreshToken: { type: String },
+    expiresAt: { type: Date },
+    connectedAt: { type: Date, default: Date.now },
+    lastSyncedAt: { type: Date },
+    stats: {
+      totalFiles: { type: Number, default: 0 },
+      totalSize: { type: Number, default: 0 }, // in bytes
+      quotaUsed: { type: Number, default: 0 },
+      quotaTotal: { type: Number, default: 0 },
+    },
   }],
 }, { _id: false });
 

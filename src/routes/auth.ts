@@ -72,21 +72,18 @@ router.post('/register', async (req, res) => {
       } as ApiResponse<null>);
     }
 
-    // Hash password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
     // Get client IP address for legal record
     const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
     const now = new Date();
 
     // Create user with default preferences and legal acceptance
+    // Note: Password will be automatically hashed by the pre-save hook in User model
     const user = await User.create({
       fullName: name,
       preferredName: name.split(' ')[0], // Use first name as preferred name
       name, // Legacy field for compatibility
       email: email.toLowerCase(),
-      password: hashedPassword,
+      password: password, // Will be hashed by pre-save hook
       hasCompletedOnboarding: false, // User needs to complete profile setup
       preferences: {
         voiceEnabled: true,
@@ -130,6 +127,22 @@ router.post('/register', async (req, res) => {
 
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
+
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log('✅ Session created for new user:', user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session during registration:', sessionError);
+      // Don't fail registration if session creation fails
+    }
 
     // Send welcome email (optional, non-blocking)
     emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
@@ -255,6 +268,22 @@ router.post('/register-enhanced', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log('✅ Session created for new user (enhanced):', user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session during enhanced registration:', sessionError);
+      // Don't fail registration if session creation fails
+    }
+
     // Send welcome email (optional, non-blocking)
     emailService.sendWelcomeEmail(user.email, user.fullName).catch(err =>
       console.error('Failed to send welcome email:', err)
@@ -350,6 +379,22 @@ router.post('/oauth/google', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log(`✅ Session created for user (Google OAuth):`, user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session during Google OAuth:', sessionError);
+      // Don't fail login if session creation fails
+    }
+
     const userResponse = {
       id: user._id,
       fullName: user.fullName,
@@ -440,6 +485,22 @@ router.post('/oauth/apple', async (req, res) => {
 
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
+
+    // Create session
+    try {
+      await SessionService.createSession(
+        user._id.toString(),
+        token,
+        {
+          userAgent: req.headers['user-agent'] || 'Unknown',
+          ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+        }
+      );
+      console.log(`✅ Session created for user (Apple OAuth):`, user.email);
+    } catch (sessionError) {
+      console.error('⚠️ Failed to create session during Apple OAuth:', sessionError);
+      // Don't fail login if session creation fails
+    }
 
     const userResponse = {
       id: user._id,

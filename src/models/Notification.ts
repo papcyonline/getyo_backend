@@ -2,13 +2,13 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface INotification extends Document {
   userId: string;
-  type: 'task' | 'event' | 'reminder' | 'system' | 'ai_suggestion' | 'meeting' | 'alert';
+  type: 'task' | 'event' | 'reminder' | 'system' | 'ai_suggestion' | 'meeting' | 'alert' | 'pattern_detected' | 'forgotten_activity';
   title: string;
   message: string;
   read: boolean;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   relatedId?: string; // Reference to task/event/reminder ID
-  relatedModel?: 'Task' | 'Event' | 'Reminder' | 'Assignment';
+  relatedModel?: 'Task' | 'Event' | 'Reminder' | 'Assignment' | 'Pattern';
   actionUrl?: string; // Deep link to navigate within app
   metadata?: Record<string, any>; // Additional data
   createdAt: Date;
@@ -40,7 +40,7 @@ const NotificationSchema = new Schema<INotification>({
   userId: { type: String, required: true, index: true },
   type: {
     type: String,
-    enum: ['task', 'event', 'reminder', 'system', 'ai_suggestion', 'meeting', 'alert'],
+    enum: ['task', 'event', 'reminder', 'system', 'ai_suggestion', 'meeting', 'alert', 'pattern_detected', 'forgotten_activity'],
     required: true,
   },
   title: { type: String, required: true, trim: true },
@@ -54,7 +54,7 @@ const NotificationSchema = new Schema<INotification>({
   relatedId: { type: String },
   relatedModel: {
     type: String,
-    enum: ['Task', 'Event', 'Reminder', 'Assignment'],
+    enum: ['Task', 'Event', 'Reminder', 'Assignment', 'Pattern'],
   },
   actionUrl: { type: String, trim: true },
   metadata: { type: Schema.Types.Mixed },

@@ -34,13 +34,16 @@ router.get('/profile', async (req, res) => {
       assistantProfileImage: user.assistantProfileImage,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
       // Legacy field for backward compatibility
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
       profileImage: user.profileImage,
       preferences: user.preferences,
       integrations: user.integrations,
+      agentConfiguration: user.agentConfiguration,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -94,13 +97,16 @@ router.put('/profile', async (req, res) => {
       assistantProfileImage: user.assistantProfileImage,
       assistantGender: user.assistantGender,
       assistantVoice: user.assistantVoice,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
       // Legacy field for backward compatibility
       name: user.name,
       email: user.email,
       phone: user.phone,
+      phoneVerified: user.phoneVerified,
       profileImage: user.profileImage,
       preferences: user.preferences,
       integrations: user.integrations,
+      agentConfiguration: user.agentConfiguration,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };

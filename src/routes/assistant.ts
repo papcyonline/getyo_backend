@@ -6,11 +6,25 @@ import { uploadBase64Image, uploadImageBuffer, upload } from '../services/imageU
 
 const router = express.Router();
 
+// Conditional multer middleware - only apply if content-type is multipart/form-data
+const conditionalUpload = (req: any, res: any, next: any) => {
+  const contentType = req.headers['content-type'] || '';
+  if (contentType.includes('multipart/form-data')) {
+    return upload.single('profileImage')(req, res, next);
+  }
+  next();
+};
+
 // @route   POST /api/assistant/setup
 // @desc    Set up Personal Assistant name and profile image
 // @access  Private
-router.post('/setup', authenticateToken, upload.single('profileImage'), async (req: any, res) => {
+router.post('/setup', authenticateToken, conditionalUpload, async (req: any, res) => {
   try {
+    console.log('🔔 [/api/assistant/setup] Request received from:', req.ip || req.connection.remoteAddress);
+    console.log('🔔 [/api/assistant/setup] Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('🔔 [/api/assistant/setup] Body:', req.body);
+    console.log('🔔 [/api/assistant/setup] File:', req.file ? 'Yes' : 'No');
+
     const userId = req.userId;
     const { assistantName, assistantProfileImage } = req.body;
 
@@ -154,7 +168,7 @@ router.get('/setup', authenticateToken, async (req: any, res) => {
 // @route   PUT /api/assistant/profile-image
 // @desc    Update Personal Assistant profile image only
 // @access  Private
-router.put('/profile-image', authenticateToken, upload.single('profileImage'), async (req: any, res) => {
+router.put('/profile-image', authenticateToken, conditionalUpload, async (req: any, res) => {
   try {
     const userId = req.userId;
 

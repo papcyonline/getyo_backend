@@ -14,6 +14,8 @@ export interface IAssignment extends Document {
   estimatedCompletionTime?: Date;
   completedAt?: Date;
   notificationSent: boolean;
+  viewed?: boolean;
+  viewedAt?: Date;
   metadata?: {
     searchQueries?: string[];
     dataPoints?: any[];
@@ -50,6 +52,8 @@ const AssignmentSchema = new Schema<IAssignment>({
   estimatedCompletionTime: { type: Date },
   completedAt: { type: Date },
   notificationSent: { type: Boolean, default: false },
+  viewed: { type: Boolean, default: false },
+  viewedAt: { type: Date },
   metadata: {
     searchQueries: [{ type: String }],
     dataPoints: [{ type: Schema.Types.Mixed }],
