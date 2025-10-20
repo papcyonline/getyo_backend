@@ -3,6 +3,9 @@ import Conversation from '../models/Conversation';
 import { AuthRequest } from '../types';
 import { openaiService, ChatMessage } from '../services/openaiService';
 import { User } from '../models';
+import ConversationMemoryService from '../services/ConversationMemoryService';
+import assignmentProcessingJob from '../jobs/assignmentProcessingJob';
+import { TaskStatus, AssignmentStatus } from '../constants/statuses';
 
 export const conversationController = {
   // Get all conversations for a user
@@ -343,6 +346,25 @@ export const conversationController = {
 
           intentData = JSON.parse(cleanedResponse);
 
+          // Check if clarification is needed
+          if (intentData.needsClarification) {
+            console.log(`❓ Clarification needed: ${intentData.clarificationNeeded}`);
+
+            // Don't create any actions, just ask for clarification
+            // The PA will ask the user through the conversational response
+            // intentData.hasActions should be false when needsClarification is true
+          }
+
+          // Check if permission is needed
+          if (intentData.needsPermission) {
+            console.log(`🔐 Permission needed: ${intentData.permissionsNeeded?.join(', ')}`);
+            console.log(`📝 Reason: ${intentData.permissionReason}`);
+
+            // Don't create any actions, just prompt for permission
+            // The PA will ask the user to grant permission through the conversational response
+            // intentData.hasActions should be false when needsPermission is true
+          }
+
           if (intentData.hasActions) {
             console.log(`🤖 Detected actions:`, intentData);
 
@@ -355,7 +377,7 @@ export const conversationController = {
                   description: taskData.description || '',
                   priority: taskData.priority || 'medium',
                   dueDate: taskData.dueDate ? new Date(taskData.dueDate) : null,
-                  status: 'pending',
+                  status: TaskStatus.PENDING,
                   createdBy: 'ai', // Valid enum: 'user', 'ai', 'voice'
                 });
                 await task.save();
@@ -379,81 +401,15 @@ export const conversationController = {
                     query: assignmentData.query,
                     type: assignmentData.type || 'research',
                     priority: assignmentData.priority || 'medium',
-                    status: 'in_progress',
+                    status: AssignmentStatus.IN_PROGRESS,
                   });
                   await assignment.save();
                   console.log(`🎯 Assignment created: ${assignment.title}`);
 
-                  // PA performs the research immediately (async)
-                  // In production, this would be a background job
-                  try {
-                    const researchPrompt = `You are a research assistant. The user asked: "${assignmentData.query}"
-
-Perform comprehensive research and provide:
-1. A clear, concise summary (2-3 sentences)
-2. Key findings (3-5 bullet points)
-3. Relevant data or recommendations
-4. Sources or references if applicable
-
-Format your response as structured information that can be displayed in a notification.`;
-
-                    const researchResponse = await openaiService.generateChatCompletion(
-                      [{ role: 'user', content: researchPrompt }],
-                      userId as string,
-                      assistantName
-                    );
-
-                    if (researchResponse.success && researchResponse.message) {
-                      // Update assignment with findings
-                      assignment.findings = researchResponse.message;
-                      assignment.status = 'completed';
-                      assignment.completedAt = new Date();
-                      await assignment.save();
-
-                      // Auto-create note with research findings
-                      const researchNote = new Note({
-                        userId,
-                        title: `Research: ${assignment.title}`,
-                        content: researchResponse.message,
-                        category: 'research',
-                        tags: [assignment.type, 'pa-research', 'auto-generated'],
-                        metadata: {
-                          assignmentId: String(assignment._id),
-                          query: assignment.query,
-                          completedAt: new Date(),
-                          source: 'assignment',
-                        },
-                      });
-                      await researchNote.save();
-                      console.log(`📝 Auto-created note from assignment: ${researchNote.title}`);
-
-                      // Create notification with findings
-                      await Notification.createNotification({
-                        userId: userId as string,
-                        type: 'ai_suggestion',
-                        title: `Assignment Complete: ${assignment.title}`,
-                        message: `Your PA has completed research on: ${assignment.title}\n\n${researchResponse.message}`,
-                        priority: 'high',
-                        relatedId: String(assignment._id),
-                        relatedModel: 'Assignment',
-                        actionUrl: `/assignments/${String(assignment._id)}`,
-                        metadata: {
-                          assignmentType: assignment.type,
-                          query: assignment.query,
-                          noteId: String(researchNote._id),
-                        },
-                      });
-
-                      assignment.notificationSent = true;
-                      await assignment.save();
-
-                      console.log(`✅ Assignment completed and notification sent: ${assignment.title}`);
-                    }
-                  } catch (researchError) {
-                    console.error('Research failed:', researchError);
-                    assignment.status = 'failed';
-                    await assignment.save();
-                  }
+                  // Queue assignment for background processing
+                  // User can close app, PA will notify when done
+                  await assignmentProcessingJob.queue(String(assignment._id));
+                  console.log(`⏰ Assignment queued for background processing: ${String(assignment._id)}`)
 
                   actionsExecuted.push({ type: 'assignment', data: assignment });
                 } catch (assignmentError) {
@@ -597,9 +553,16 @@ Format your response as structured information that can be displayed in a notifi
         console.warn('⚠️ Could not parse intent data, continuing without actions:', parseError);
       }
 
-      // GET COMPREHENSIVE PA CONTEXT
+      // GET COMPREHENSIVE PA CONTEXT + QUICK ACTIONS DATA + INTEGRATION DATA
       const paContextService = (await import('../services/paContextService')).default;
-      const contextSummary = await paContextService.getContextSummary(userId as string);
+      const quickActionsService = (await import('../services/quickActionsAggregatorService')).default;
+      const integrationService = (await import('../services/integrationAggregatorService')).default;
+
+      const [contextSummary, quickActionsSummary, integrationSummary] = await Promise.all([
+        paContextService.getContextSummary(userId as string),
+        quickActionsService.generateQuickActionsSummary(userId as string),
+        integrationService.generateIntegrationSummary(userId as string)
+      ]);
 
       // Prepare messages for OpenAI response (convert format)
       const chatMessages: ChatMessage[] = conversation.messages.slice(-10).map(msg => ({
@@ -614,6 +577,44 @@ Format your response as structured information that can be displayed in a notifi
 
 ${contextSummary}
 
+${intentData?.needsClarification ? `
+⚠️⚠️⚠️ IMPORTANT - CLARIFICATION NEEDED ⚠️⚠️⚠️
+The user's request is missing critical information. You MUST ask them:
+"${intentData.clarificationNeeded}"
+
+DO NOT create any actions until you get this information.
+Ask the question naturally and wait for their response.
+Example: "Sure! ${intentData.clarificationNeeded}"
+` : ''}
+
+${intentData?.needsPermission ? `
+🔐🔐🔐 IMPORTANT - PERMISSION REQUIRED 🔐🔐🔐
+The user's request requires device permissions that haven't been granted yet.
+
+Permissions needed: ${intentData.permissionsNeeded?.join(', ')}
+Reason: ${intentData.permissionReason}
+
+You MUST respond by:
+1. Explaining what you want to do for them
+2. Explaining why you need the permission
+3. Asking them to grant the permission in settings
+
+Example response:
+"I'd love to help you with that! To ${intentData.permissionReason}, I need access to your ${intentData.permissionsNeeded?.join(' and ')}.
+
+Could you please grant me ${intentData.permissionsNeeded?.join(' and ')} permission? Just go to your device Settings → Yo! → Permissions and enable ${intentData.permissionsNeeded?.join(' and ')}. Once you do that, I'll be able to help you right away!"
+
+BE HELPFUL and ENCOURAGING. Make it easy for them to understand what to do.
+` : ''}
+
+═══════════════════════════════════════════════════════════
+📱 QUICK ACTIONS DASHBOARD - COMPREHENSIVE USER DATA
+═══════════════════════════════════════════════════════════
+
+${quickActionsSummary}
+
+${integrationSummary}
+
 CAPABILITIES:
 You can:
 1. CREATE: Tasks, Reminders, Notes, Calendar Events, Email Drafts, Meetings
@@ -622,17 +623,32 @@ You can:
 4. MANAGE: Guide users on connecting integrations, updating settings
 5. SEARCH: Find emails, tasks, calendar events, notes
 
+IMPORTANT QUERY HANDLING:
+When the user asks about:
+- "What's happening today/tomorrow?" → Reference upcomingActivities.today or upcomingActivities.tomorrow
+- "Any tasks due soon?" → Reference tasks.dueToday, tasks.dueTomorrow, tasks.dueThisWeek
+- "What's on my schedule?" → Reference calendarEvents.today, calendarEvents.tomorrow
+- "Any reminders?" → Reference reminders.dueToday, reminders.dueTomorrow
+- "Latest updates?" → Reference latestUpdates (notifications, completedAssignments, completedTasks)
+- "What did I accomplish?" → Reference completedTasks, completedAssignments
+- "Show me my notes" → Reference notes.recent, notes.todayNotes
+- "What integrations are connected?" → Reference integration summary (Google, Microsoft, Social Media, etc.)
+- "Can you access my [service]?" → Check integration status and permissions
+- "Read my location/contacts/photos" → Check device permissions first
+- "Send email/message" → Verify email/communication integrations are connected
+
 CONTEXT AWARENESS:
 - Know what integrations are connected and suggest connecting missing ones
-- Reference user's current data when answering questions
+- Reference user's current data when answering questions (use specific numbers and details from Quick Actions data)
 - Provide personalized responses based on user's profile and activity
 - Be proactive in suggesting optimizations and improvements
 
 RESPONSE STYLE:
-- Friendly and conversational using the user's name (${user?.name || 'there'})
+- Friendly and conversational using the user's name (${user?.preferredName || user?.fullName || 'there'})
 - Concise but informative
 - Proactive in offering help
-- Reference specific data when relevant (e.g., "You have 5 tasks due today")
+- Reference specific data when relevant (e.g., "You have 5 tasks due today, 3 reminders set, and 2 calendar events")
+- When listing activities, organize by time (today first, then tomorrow, then this week)
 
 Always maintain context from previous messages in the conversation.`
       });
@@ -796,6 +812,25 @@ Always maintain context from previous messages in the conversation.`
 
           intentData = JSON.parse(cleanedResponse);
 
+          // Check if clarification is needed
+          if (intentData.needsClarification) {
+            console.log(`❓ Clarification needed: ${intentData.clarificationNeeded}`);
+
+            // Don't create any actions, just ask for clarification
+            // The PA will ask the user through the conversational response
+            // intentData.hasActions should be false when needsClarification is true
+          }
+
+          // Check if permission is needed
+          if (intentData.needsPermission) {
+            console.log(`🔐 Permission needed: ${intentData.permissionsNeeded?.join(', ')}`);
+            console.log(`📝 Reason: ${intentData.permissionReason}`);
+
+            // Don't create any actions, just prompt for permission
+            // The PA will ask the user to grant permission through the conversational response
+            // intentData.hasActions should be false when needsPermission is true
+          }
+
           if (intentData.hasActions) {
             console.log(`🤖 Detected actions from voice:`, intentData);
 
@@ -808,7 +843,7 @@ Always maintain context from previous messages in the conversation.`
                   description: taskData.description || '',
                   priority: taskData.priority || 'medium',
                   dueDate: taskData.dueDate ? new Date(taskData.dueDate) : null,
-                  status: 'pending',
+                  status: TaskStatus.PENDING,
                   createdBy: 'voice', // Valid enum: 'user', 'ai', 'voice'
                 });
                 await task.save();
@@ -831,79 +866,15 @@ Always maintain context from previous messages in the conversation.`
                     query: assignmentData.query,
                     type: assignmentData.type || 'research',
                     priority: assignmentData.priority || 'medium',
-                    status: 'in_progress',
+                    status: AssignmentStatus.IN_PROGRESS,
                   });
                   await assignment.save();
                   console.log(`🎯 Assignment created from voice: ${assignment.title}`);
 
-                  // PA performs the research immediately
-                  try {
-                    const researchPrompt = `You are a research assistant. The user asked: "${assignmentData.query}"
-
-Perform comprehensive research and provide:
-1. A clear, concise summary (2-3 sentences)
-2. Key findings (3-5 bullet points)
-3. Relevant data or recommendations
-4. Sources or references if applicable
-
-Format your response as structured information that can be displayed in a notification.`;
-
-                    const researchResponse = await openaiService.generateChatCompletion(
-                      [{ role: 'user', content: researchPrompt }],
-                      userId as string,
-                      assistantName
-                    );
-
-                    if (researchResponse.success && researchResponse.message) {
-                      assignment.findings = researchResponse.message;
-                      assignment.status = 'completed';
-                      assignment.completedAt = new Date();
-                      await assignment.save();
-
-                      // Auto-create note with research findings
-                      const researchNote = new Note({
-                        userId,
-                        title: `Research: ${assignment.title}`,
-                        content: researchResponse.message,
-                        category: 'research',
-                        tags: [assignment.type, 'pa-research', 'auto-generated', 'voice'],
-                        metadata: {
-                          assignmentId: String(assignment._id),
-                          query: assignment.query,
-                          completedAt: new Date(),
-                          source: 'assignment-voice',
-                        },
-                      });
-                      await researchNote.save();
-                      console.log(`📝 Auto-created note from voice assignment: ${researchNote.title}`);
-
-                      // Create notification with findings
-                      await Notification.createNotification({
-                        userId: userId as string,
-                        type: 'ai_suggestion',
-                        title: `Assignment Complete: ${assignment.title}`,
-                        message: `Your PA has completed research on: ${assignment.title}\n\n${researchResponse.message}`,
-                        priority: 'high',
-                        relatedId: String(assignment._id),
-                        relatedModel: 'Assignment',
-                        actionUrl: `/assignments/${String(assignment._id)}`,
-                        metadata: {
-                          assignmentType: assignment.type,
-                          query: assignment.query,
-                          noteId: String(researchNote._id),
-                        },
-                      });
-
-                      assignment.notificationSent = true;
-                      await assignment.save();
-
-                      console.log(`✅ Assignment from voice completed and notification sent: ${assignment.title}`);
-                    }
-                  } catch (researchError) {
-                    console.error('Voice research failed:', researchError);
-                    assignment.status = 'failed';
-                    await assignment.save();
-                  }
+                  // Queue assignment for background processing
+                  // User can close app, PA will notify when done
+                  await assignmentProcessingJob.queue(String(assignment._id));
+                  console.log(`⏰ Voice assignment queued for background processing: ${String(assignment._id)}`)
 
                   actionsExecuted.push({ type: 'assignment', data: assignment });
                 } catch (assignmentError) {
@@ -1045,9 +1016,16 @@ Format your response as structured information that can be displayed in a notifi
         console.warn('⚠️ Could not parse intent data from voice, continuing without actions:', parseError);
       }
 
-      // GET COMPREHENSIVE PA CONTEXT (same as sendMessage)
+      // GET COMPREHENSIVE PA CONTEXT + QUICK ACTIONS DATA + INTEGRATION DATA (same as sendMessage)
       const paContextService = (await import('../services/paContextService')).default;
-      const contextSummary = await paContextService.getContextSummary(userId as string);
+      const quickActionsService = (await import('../services/quickActionsAggregatorService')).default;
+      const integrationService = (await import('../services/integrationAggregatorService')).default;
+
+      const [contextSummary, quickActionsSummary, integrationSummary] = await Promise.all([
+        paContextService.getContextSummary(userId as string),
+        quickActionsService.generateQuickActionsSummary(userId as string),
+        integrationService.generateIntegrationSummary(userId as string)
+      ]);
 
       // Prepare messages for OpenAI (convert format)
       const chatMessages: ChatMessage[] = conversation.messages.slice(-10).map(msg => ({
@@ -1062,6 +1040,44 @@ Format your response as structured information that can be displayed in a notifi
 
 ${contextSummary}
 
+${intentData?.needsClarification ? `
+⚠️⚠️⚠️ IMPORTANT - CLARIFICATION NEEDED ⚠️⚠️⚠️
+The user's request is missing critical information. You MUST ask them:
+"${intentData.clarificationNeeded}"
+
+DO NOT create any actions until you get this information.
+Ask the question naturally and wait for their response.
+Example: "Sure! ${intentData.clarificationNeeded}"
+` : ''}
+
+${intentData?.needsPermission ? `
+🔐🔐🔐 IMPORTANT - PERMISSION REQUIRED 🔐🔐🔐
+The user's request requires device permissions that haven't been granted yet.
+
+Permissions needed: ${intentData.permissionsNeeded?.join(', ')}
+Reason: ${intentData.permissionReason}
+
+You MUST respond by:
+1. Explaining what you want to do for them
+2. Explaining why you need the permission
+3. Asking them to grant the permission in settings
+
+Example response:
+"I'd love to help you with that! To ${intentData.permissionReason}, I need access to your ${intentData.permissionsNeeded?.join(' and ')}.
+
+Could you please grant me ${intentData.permissionsNeeded?.join(' and ')} permission? Just go to your device Settings → Yo! → Permissions and enable ${intentData.permissionsNeeded?.join(' and ')}. Once you do that, I'll be able to help you right away!"
+
+BE HELPFUL and ENCOURAGING. Make it easy for them to understand what to do.
+` : ''}
+
+═══════════════════════════════════════════════════════════
+📱 QUICK ACTIONS DASHBOARD - COMPREHENSIVE USER DATA
+═══════════════════════════════════════════════════════════
+
+${quickActionsSummary}
+
+${integrationSummary}
+
 CAPABILITIES:
 You can:
 1. CREATE: Tasks, Reminders, Notes, Calendar Events, Email Drafts, Meetings
@@ -1070,17 +1086,32 @@ You can:
 4. MANAGE: Guide users on connecting integrations, updating settings
 5. SEARCH: Find emails, tasks, calendar events, notes
 
+IMPORTANT QUERY HANDLING:
+When the user asks about:
+- "What's happening today/tomorrow?" → Reference upcomingActivities.today or upcomingActivities.tomorrow
+- "Any tasks due soon?" → Reference tasks.dueToday, tasks.dueTomorrow, tasks.dueThisWeek
+- "What's on my schedule?" → Reference calendarEvents.today, calendarEvents.tomorrow
+- "Any reminders?" → Reference reminders.dueToday, reminders.dueTomorrow
+- "Latest updates?" → Reference latestUpdates (notifications, completedAssignments, completedTasks)
+- "What did I accomplish?" → Reference completedTasks, completedAssignments
+- "Show me my notes" → Reference notes.recent, notes.todayNotes
+- "What integrations are connected?" → Reference integration summary (Google, Microsoft, Social Media, etc.)
+- "Can you access my [service]?" → Check integration status and permissions
+- "Read my location/contacts/photos" → Check device permissions first
+- "Send email/message" → Verify email/communication integrations are connected
+
 CONTEXT AWARENESS:
 - Know what integrations are connected and suggest connecting missing ones
-- Reference user's current data when answering questions
+- Reference user's current data when answering questions (use specific numbers and details from Quick Actions data)
 - Provide personalized responses based on user's profile and activity
 - Be proactive in suggesting optimizations and improvements
 
 RESPONSE STYLE:
-- Friendly and conversational using the user's name (${user?.name || 'there'})
+- Friendly and conversational using the user's name (${user?.preferredName || user?.fullName || 'there'})
 - Concise but informative
 - Proactive in offering help
-- Reference specific data when relevant (e.g., "You have 5 tasks due today")
+- Reference specific data when relevant (e.g., "You have 5 tasks due today, 3 reminders set, and 2 calendar events")
+- When listing activities, organize by time (today first, then tomorrow, then this week)
 
 Always maintain context from previous messages in the conversation.`
       });
@@ -1209,6 +1240,113 @@ Always maintain context from previous messages in the conversation.`
     }
   },
 
+  // Get text-only chat history (simple format)
+  async getChatHistory(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.userId;
+      const { limit = 50, conversationId } = req.query;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        });
+      }
+
+      let conversations;
+      if (conversationId) {
+        // Get specific conversation
+        const conversation = await Conversation.findOne({ _id: conversationId, userId });
+        conversations = conversation ? [conversation] : [];
+      } else {
+        // Get all recent conversations
+        conversations = await Conversation.find({ userId })
+          .sort({ updatedAt: -1 })
+          .limit(parseInt(limit as string));
+      }
+
+      // Extract text-only messages
+      const chatHistory = conversations.map(conv => ({
+        conversationId: conv._id,
+        title: conv.title,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        messages: conv.messages.map(msg => ({
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp,
+        })),
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          conversations: chatHistory,
+          totalConversations: chatHistory.length,
+        },
+        message: 'Chat history retrieved successfully',
+      });
+    } catch (error) {
+      console.error('Error getting chat history:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve chat history',
+      });
+    }
+  },
+
+  // Get all messages in simple text format (consolidated across conversations)
+  async getAllMessages(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.userId;
+      const { limit = 100 } = req.query;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        });
+      }
+
+      // Get all conversations
+      const conversations = await Conversation.find({ userId })
+        .sort({ updatedAt: -1 })
+        .limit(parseInt(limit as string));
+
+      // Flatten all messages from all conversations
+      const allMessages: any[] = [];
+      conversations.forEach(conv => {
+        conv.messages.forEach(msg => {
+          allMessages.push({
+            conversationId: conv._id,
+            conversationTitle: conv.title,
+            role: msg.role,
+            content: msg.content,
+            timestamp: msg.timestamp,
+          });
+        });
+      });
+
+      // Sort by timestamp (most recent first)
+      allMessages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      res.json({
+        success: true,
+        data: {
+          messages: allMessages.slice(0, parseInt(limit as string)),
+          totalMessages: allMessages.length,
+        },
+        message: 'All messages retrieved successfully',
+      });
+    } catch (error) {
+      console.error('Error getting all messages:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve messages',
+      });
+    }
+  },
+
   // Extract tasks, events, and reminders from conversation text
   async extractTasksFromConversation(req: AuthRequest, res: Response) {
     try {
@@ -1323,6 +1461,111 @@ Rules:
       res.status(500).json({
         success: false,
         error: 'Failed to extract tasks from conversation',
+      });
+    }
+  },
+
+  // Get conversation stats and memory analytics
+  async getConversationStats(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.userId;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        });
+      }
+
+      const stats = await ConversationMemoryService.getUserConversationStats(userId);
+
+      res.json({
+        success: true,
+        data: stats,
+        message: 'Conversation stats retrieved successfully',
+      });
+    } catch (error) {
+      console.error('Error getting conversation stats:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get conversation stats',
+      });
+    }
+  },
+
+  // Manually trigger conversation summarization
+  async summarizeConversation(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.userId;
+      const { id } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        });
+      }
+
+      // Verify ownership
+      const conversation = await Conversation.findOne({ _id: id, userId });
+      if (!conversation) {
+        return res.status(404).json({
+          success: false,
+          error: 'Conversation not found',
+        });
+      }
+
+      const summary = await ConversationMemoryService.summarizeConversation(id);
+
+      if (!summary) {
+        return res.status(400).json({
+          success: false,
+          error: 'Failed to summarize conversation (may be too short)',
+        });
+      }
+
+      res.json({
+        success: true,
+        data: summary,
+        message: 'Conversation summarized successfully',
+      });
+    } catch (error) {
+      console.error('Error summarizing conversation:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to summarize conversation',
+      });
+    }
+  },
+
+  // Archive old conversations
+  async archiveOldConversations(req: AuthRequest, res: Response) {
+    try {
+      const userId = req.userId;
+      const { daysOld = 90 } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: 'Unauthorized',
+        });
+      }
+
+      const archivedCount = await ConversationMemoryService.archiveOldConversations(
+        userId,
+        parseInt(daysOld as string)
+      );
+
+      res.json({
+        success: true,
+        data: { archivedCount },
+        message: `Archived ${archivedCount} conversations`,
+      });
+    } catch (error) {
+      console.error('Error archiving conversations:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to archive conversations',
       });
     }
   },
