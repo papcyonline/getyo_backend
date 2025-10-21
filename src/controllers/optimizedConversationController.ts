@@ -35,7 +35,7 @@ export const optimizedConversationController = {
 
     try {
       const userId = req.userId;
-      const { message, conversationId } = req.body;
+      const { message, conversationId, mode = 'text' } = req.body; // mode: 'text' | 'voice'
 
       if (!userId) {
         return res.status(401).json({
@@ -50,6 +50,9 @@ export const optimizedConversationController = {
           error: 'Message is required',
         });
       }
+
+      const isVoiceMode = mode === 'voice';
+      logger.info(`[OptimizedController] Processing message in ${mode} mode`);
 
       // Get user info
       const user = await User.findById(userId);
@@ -89,7 +92,8 @@ export const optimizedConversationController = {
         message.trim(),
         userId as string,
         conversationHistory,
-        assistantName
+        assistantName,
+        mode  // Pass mode to AI service
       );
 
       if (!aiResponse.success || !aiResponse.data) {

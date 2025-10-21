@@ -32,11 +32,22 @@ class PushNotificationService {
    */
   async initialize(): Promise<void> {
     try {
+      // Check if using Expo Push (simpler, no Firebase needed)
+      const useExpoPush = process.env.USE_EXPO_PUSH === 'true';
+
+      if (useExpoPush) {
+        logger.info('[PushNotification] ✅ Using Expo Push Notification Service (no Firebase needed)');
+        this.isEnabled = true;
+        return;
+      }
+
+      // Otherwise use Firebase
       const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
       const databaseURL = process.env.FIREBASE_DATABASE_URL;
 
       if (!serviceAccountPath || !databaseURL) {
         logger.warn('[PushNotification] Firebase not configured. Push notifications disabled.');
+        logger.info('[PushNotification] 💡 Tip: Set USE_EXPO_PUSH=true in .env to use Expo Push instead');
         this.isEnabled = false;
         return;
       }
@@ -73,6 +84,38 @@ class PushNotificationService {
     }
 
     try {
+      // Use Expo Push if enabled
+      if (process.env.USE_EXPO_PUSH === 'true') {
+        const axios = (await import('axios')).default;
+
+        const message = {
+          to: deviceToken,
+          sound: payload.sound || 'default',
+          title: payload.title,
+          body: payload.body,
+          data: payload.data || {},
+          priority: payload.priority || 'high',
+          badge: payload.badge,
+        };
+
+        const response = await axios.post('https://exp.host/--/api/v2/push/send', message, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+        });
+
+        logger.info(`[PushNotification] ✅ Expo Push sent to device: ${deviceToken.substring(0, 20)}...`);
+
+        // Update notification delivery status
+        if (notificationId) {
+          await this.markAsDelivered(notificationId, deviceToken);
+        }
+
+        return true;
+      }
+
+      // Otherwise use Firebase Admin
       const admin = await import('firebase-admin');
 
       const message: any = {
@@ -100,7 +143,7 @@ class PushNotificationService {
       };
 
       const response = await admin.messaging().send(message);
-      logger.info(`[PushNotification] ✅ Sent to device: ${deviceToken.substring(0, 10)}...`);
+      logger.info(`[PushNotification] ✅ Firebase sent to device: ${deviceToken.substring(0, 10)}...`);
 
       // Update notification delivery status
       if (notificationId) {

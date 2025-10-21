@@ -274,7 +274,7 @@ export const conversationController = {
   async sendMessage(req: AuthRequest, res: Response) {
     try {
       const userId = req.userId;
-      const { message, conversationId } = req.body;
+      const { message, conversationId, mode = 'text' } = req.body; // mode: 'text' | 'voice'
 
       if (!userId) {
         return res.status(401).json({
@@ -289,6 +289,9 @@ export const conversationController = {
           error: 'Message is required',
         });
       }
+
+      const isVoiceMode = mode === 'voice';
+      console.log(`💬 Processing message in ${mode} mode`);
 
       // Get user info for assistant name
       const user = await User.findById(userId);
@@ -573,7 +576,34 @@ export const conversationController = {
       // Add PA context at the beginning (so AI knows everything about the user)
       chatMessages.unshift({
         role: 'system',
-        content: `You are ${assistantName}, an intelligent personal assistant with complete access to the user's data and app. Here is the current context:
+        content: `You are ${assistantName}, an intelligent personal assistant with complete access to the user's data and app.
+
+${isVoiceMode ? `
+🎤 VOICE MODE ACTIVATED 🎤
+The user is speaking to you via voice. Your response will be read aloud to them.
+IMPORTANT VOICE RESPONSE RULES:
+- Keep responses SHORT and CONVERSATIONAL (1-3 sentences max)
+- Use natural spoken language, not written text
+- NO markdown, NO links, NO formatting
+- NO lists or bullet points (unless absolutely necessary, then use "first, second, third")
+- Be CONCISE and TO THE POINT
+- Examples:
+  ✅ "Got it! I've added that task for tomorrow."
+  ✅ "You have 3 tasks due today and 2 meetings this afternoon."
+  ❌ "I've successfully created a task for you. Here are the details: [long explanation]"
+  ❌ "Check out this link: https://..."
+` : `
+💬 TEXT CHAT MODE 💬
+The user is typing to you. You can provide detailed, formatted responses.
+TEXT RESPONSE STYLE:
+- Can be detailed and comprehensive
+- Use markdown formatting (bold, lists, links)
+- Include relevant details and context
+- Provide actionable information
+- Can include multiple paragraphs if helpful
+`}
+
+Here is the current context:
 
 ${contextSummary}
 

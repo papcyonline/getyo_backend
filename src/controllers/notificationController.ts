@@ -64,6 +64,40 @@ export const notificationController = {
 
       const notification = await (Notification as any).createNotification(notificationData);
 
+      // Send push notification to user's device
+      try {
+        const User = (await import('../models/User')).default;
+        const PushNotificationService = (await import('../services/PushNotificationService')).default;
+
+        const user = await User.findById(userId);
+
+        if (user && user.pushToken && user.pushNotificationsEnabled !== false) {
+          console.log(`📲 Sending push notification to user ${userId}`);
+
+          await PushNotificationService.sendToDevice(
+            user.pushToken,
+            {
+              title: notification.title,
+              body: notification.message,
+              data: {
+                type: notification.type,
+                notificationId: String(notification._id),
+                ...notification.data,
+              },
+              priority: notification.priority === 'high' ? 'high' : 'normal',
+            },
+            String(notification._id)
+          );
+
+          console.log(`✅ Push notification sent successfully`);
+        } else {
+          console.log(`ℹ️ No push token or notifications disabled for user ${userId}`);
+        }
+      } catch (pushError) {
+        console.error('Failed to send push notification:', pushError);
+        // Don't fail the whole notification creation if push fails
+      }
+
       res.status(201).json({
         success: true,
         data: notification,

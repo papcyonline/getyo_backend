@@ -481,6 +481,9 @@ const UserSchema = new Schema<any>({
     method: { type: String, enum: ['email', 'sms'], default: 'email' },
     verifiedAt: { type: Date },
   },
+  // Push Notifications
+  pushToken: { type: String, trim: true }, // Expo Push Token for sending push notifications
+  pushNotificationsEnabled: { type: Boolean, default: true }, // User preference for push notifications
 }, {
   timestamps: true,
   toJSON: {

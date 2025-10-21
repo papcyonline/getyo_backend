@@ -21,6 +21,7 @@ import SocketService from './services/SocketService';
 import LegalService from './services/LegalService';
 import JobScheduler from './jobs';
 import RedisCacheService from './services/RedisCacheService';
+import PushNotificationService from './services/PushNotificationService';
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -206,6 +207,10 @@ async function startServer() {
     // Initialize Redis cache (optional - continues without it if not configured)
     console.log('Initializing Redis cache...');
     await RedisCacheService.initialize();
+
+    // Initialize Push Notification Service
+    console.log('Initializing push notifications...');
+    await PushNotificationService.initialize();
 
     // Initialize WebSocket service
     console.log('Initializing WebSocket service...');

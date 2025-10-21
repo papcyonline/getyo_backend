@@ -508,4 +508,48 @@ router.put('/privacy-settings', async (req, res) => {
   }
 });
 
+// @route   POST /api/users/push-token
+// @desc    Save user's push notification token
+// @access  Private
+router.post('/push-token', async (req, res) => {
+  try {
+    const userId = (req as any).userId;
+    const { pushToken } = req.body;
+
+    if (!pushToken) {
+      return res.status(400).json({
+        success: false,
+        error: 'Push token is required',
+      } as ApiResponse<null>);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: { pushToken } },
+      { new: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      } as ApiResponse<null>);
+    }
+
+    console.log(`✅ Push token saved for user ${userId}: ${pushToken.substring(0, 20)}...`);
+
+    res.json({
+      success: true,
+      data: { pushToken: user.pushToken },
+      message: 'Push token saved successfully',
+    } as ApiResponse<any>);
+  } catch (error) {
+    console.error('Save push token error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    } as ApiResponse<null>);
+  }
+});
+
 export default router;
