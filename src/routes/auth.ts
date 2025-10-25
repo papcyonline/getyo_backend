@@ -128,7 +128,7 @@ router.post('/register', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -139,9 +139,19 @@ router.post('/register', async (req, res) => {
         }
       );
       console.log('✅ Session created for new user:', user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session during registration:', sessionError);
-      // Don't fail registration if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during registration:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Registration successful but failed to create session. Please try logging in.',
+      } as ApiResponse<null>);
     }
 
     // Send welcome email (optional, non-blocking)
@@ -268,7 +278,7 @@ router.post('/register-enhanced', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -279,9 +289,19 @@ router.post('/register-enhanced', async (req, res) => {
         }
       );
       console.log('✅ Session created for new user (enhanced):', user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session during enhanced registration:', sessionError);
-      // Don't fail registration if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during enhanced registration:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Registration successful but failed to create session. Please try logging in.',
+      } as ApiResponse<null>);
     }
 
     // Send welcome email (optional, non-blocking)
@@ -379,7 +399,7 @@ router.post('/oauth/google', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -390,9 +410,19 @@ router.post('/oauth/google', async (req, res) => {
         }
       );
       console.log(`✅ Session created for user (Google OAuth):`, user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session during Google OAuth:', sessionError);
-      // Don't fail login if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during Google OAuth:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user session. Please try again.',
+      } as ApiResponse<null>);
     }
 
     const userResponse = {
@@ -486,7 +516,7 @@ router.post('/oauth/apple', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -497,9 +527,19 @@ router.post('/oauth/apple', async (req, res) => {
         }
       );
       console.log(`✅ Session created for user (Apple OAuth):`, user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session during Apple OAuth:', sessionError);
-      // Don't fail login if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during Apple OAuth:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user session. Please try again.',
+      } as ApiResponse<null>);
     }
 
     const userResponse = {
@@ -632,7 +672,7 @@ router.post('/login', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -643,9 +683,19 @@ router.post('/login', async (req, res) => {
         }
       );
       console.log('✅ Session created for user:', user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session:', sessionError);
-      // Don't fail login if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during login:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user session. Please try again.',
+      } as ApiResponse<null>);
     }
 
     // Remove password from response
@@ -1797,7 +1847,7 @@ router.post('/login-2fa-verify', async (req, res) => {
     // Generate token
     const token = generateToken(user._id.toString(), user.email);
 
-    // Create session
+    // Create session - CRITICAL: Session is required for authentication middleware
     try {
       await SessionService.createSession(
         user._id.toString(),
@@ -1808,9 +1858,19 @@ router.post('/login-2fa-verify', async (req, res) => {
         }
       );
       console.log('✅ Session created for user (2FA):', user.email);
-    } catch (sessionError) {
-      console.error('⚠️ Failed to create session:', sessionError);
-      // Don't fail login if session creation fails
+    } catch (sessionError: any) {
+      console.error('❌ CRITICAL: Failed to create session during 2FA login:', {
+        error: sessionError.message,
+        stack: sessionError.stack,
+        user: user.email,
+        code: sessionError.code,
+      });
+
+      // Session creation is CRITICAL - without it, user will be logged out on next request
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to create user session. Please try again.',
+      } as ApiResponse<null>);
     }
 
     // Build user response
