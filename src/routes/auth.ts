@@ -636,18 +636,27 @@ router.post('/login', async (req, res) => {
       } as ApiResponse<null>);
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
+    console.log(`🔐 Login attempt for email: ${normalizedEmail}`);
+
     // Find user by email
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
+      console.log(`❌ Login failed: User not found for email: ${normalizedEmail}`);
       return res.status(400).json({
         success: false,
         error: 'Invalid email or password',
       } as ApiResponse<null>);
     }
 
+    console.log(`✅ User found: ${user.email}, checking password...`);
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
+    console.log(`🔑 Password valid: ${isPasswordValid}`);
+
     if (!isPasswordValid) {
+      console.log(`❌ Login failed: Invalid password for email: ${normalizedEmail}`);
       return res.status(400).json({
         success: false,
         error: 'Invalid email or password',
