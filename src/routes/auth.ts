@@ -1954,4 +1954,64 @@ router.post('/login-2fa-verify', async (req, res) => {
   }
 });
 
+// @route   POST /api/auth/test-session
+// @desc    Diagnostic endpoint to test session creation and show exact error
+// @access  Public (TEMPORARY - REMOVE IN PRODUCTION)
+router.post('/test-session', async (req, res) => {
+  try {
+    console.log('🧪 TEST SESSION CREATION - Starting diagnostic...');
+
+    // Generate test user ID and token
+    const testUserId = new Date().getTime().toString();
+    const testToken = `test_${Math.random().toString(36).substring(7)}`;
+
+    const deviceInfo = {
+      userAgent: req.headers['user-agent'] || 'Test User Agent',
+      ipAddress: req.ip || req.connection.remoteAddress || '127.0.0.1',
+    };
+
+    console.log('🧪 Test session params:', { testUserId, deviceInfo });
+
+    // Try to create a test session
+    const session = await SessionService.createSession(
+      testUserId,
+      testToken,
+      deviceInfo
+    );
+
+    console.log('✅ TEST SESSION CREATED SUCCESSFULLY:', session._id);
+
+    res.json({
+      success: true,
+      message: 'Session creation test PASSED',
+      data: {
+        sessionId: session._id,
+        userId: session.userId,
+        deviceInfo: session.deviceInfo,
+        location: session.location,
+        expiresAt: session.expiresAt,
+      }
+    });
+  } catch (error: any) {
+    console.error('❌ TEST SESSION CREATION FAILED:', {
+      message: error.message,
+      code: error.code,
+      name: error.name,
+      stack: error.stack,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: 'Session creation test FAILED',
+      error: {
+        message: error.message,
+        code: error.code,
+        name: error.name,
+        // Only include stack trace in development
+        ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+      }
+    });
+  }
+});
+
 export default router;
