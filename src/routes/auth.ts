@@ -147,10 +147,18 @@ router.post('/register', async (req, res) => {
         code: sessionError.code,
       });
 
+      // ROLLBACK: Delete the user since session creation failed
+      try {
+        await User.deleteOne({ _id: user._id });
+        console.log('🔄 Rolled back user creation due to session failure:', user.email);
+      } catch (deleteError) {
+        console.error('❌ Failed to rollback user creation:', deleteError);
+      }
+
       // Session creation is CRITICAL - without it, user will be logged out on next request
       return res.status(500).json({
         success: false,
-        error: 'Registration successful but failed to create session. Please try logging in.',
+        error: 'Failed to complete registration. Please try again.',
       } as ApiResponse<null>);
     }
 
@@ -297,10 +305,18 @@ router.post('/register-enhanced', async (req, res) => {
         code: sessionError.code,
       });
 
+      // ROLLBACK: Delete the user since session creation failed
+      try {
+        await User.deleteOne({ _id: user._id });
+        console.log('🔄 Rolled back user creation due to session failure:', user.email);
+      } catch (deleteError) {
+        console.error('❌ Failed to rollback user creation:', deleteError);
+      }
+
       // Session creation is CRITICAL - without it, user will be logged out on next request
       return res.status(500).json({
         success: false,
-        error: 'Registration successful but failed to create session. Please try logging in.',
+        error: 'Failed to complete registration. Please try again.',
       } as ApiResponse<null>);
     }
 
@@ -416,7 +432,18 @@ router.post('/oauth/google', async (req, res) => {
         stack: sessionError.stack,
         user: user.email,
         code: sessionError.code,
+        isNewUser,
       });
+
+      // ROLLBACK: Delete the user if it was just created
+      if (isNewUser) {
+        try {
+          await User.deleteOne({ _id: user._id });
+          console.log('🔄 Rolled back new user creation due to session failure:', user.email);
+        } catch (deleteError) {
+          console.error('❌ Failed to rollback user creation:', deleteError);
+        }
+      }
 
       // Session creation is CRITICAL - without it, user will be logged out on next request
       return res.status(500).json({
@@ -533,7 +560,18 @@ router.post('/oauth/apple', async (req, res) => {
         stack: sessionError.stack,
         user: user.email,
         code: sessionError.code,
+        isNewUser,
       });
+
+      // ROLLBACK: Delete the user if it was just created
+      if (isNewUser) {
+        try {
+          await User.deleteOne({ _id: user._id });
+          console.log('🔄 Rolled back new user creation due to session failure:', user.email);
+        } catch (deleteError) {
+          console.error('❌ Failed to rollback user creation:', deleteError);
+        }
+      }
 
       // Session creation is CRITICAL - without it, user will be logged out on next request
       return res.status(500).json({

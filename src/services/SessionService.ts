@@ -122,10 +122,26 @@ class SessionService {
       });
 
       await session.save();
+      console.log(`✅ Session saved successfully for user: ${userId}`);
       return session;
-    } catch (error) {
-      console.error('Error creating session:', error);
-      throw new Error('Failed to create session');
+    } catch (error: any) {
+      console.error('❌ SessionService.createSession ERROR:', {
+        message: error.message,
+        code: error.code,
+        name: error.name,
+        stack: error.stack,
+        userId: userId,
+        deviceInfo: {
+          userAgent: deviceInfo.userAgent,
+          ipAddress: deviceInfo.ipAddress,
+        },
+        // MongoDB duplicate key error details
+        ...(error.code === 11000 && {
+          duplicateKey: error.keyPattern,
+          duplicateValue: error.keyValue,
+        }),
+      });
+      throw new Error(`Failed to create session: ${error.message}`);
     }
   }
 
