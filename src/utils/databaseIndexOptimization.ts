@@ -17,6 +17,20 @@ export async function optimizeDatabaseIndexes(): Promise<void> {
       throw new Error('Database connection not established');
     }
 
+    // Helper function to drop indexes safely
+    const dropIndexSafely = async (collectionName: string, indexName: string) => {
+      try {
+        await db.collection(collectionName).dropIndex(indexName);
+        logger.info(`[DB Optimization] 🗑️  Dropped old index: ${collectionName}.${indexName}`);
+      } catch (error: any) {
+        if (error.code === 27 || error.codeName === 'IndexNotFound') {
+          logger.info(`[DB Optimization] ℹ️  Index ${indexName} not found in ${collectionName}, skipping drop`);
+        } else {
+          logger.warn(`[DB Optimization] ⚠️  Could not drop index ${indexName} from ${collectionName}:`, error.message);
+        }
+      }
+    };
+
     // Helper function to create indexes safely
     const createIndexesSafely = async (collectionName: string, indexes: any[]) => {
       try {
@@ -155,12 +169,17 @@ export async function optimizeDatabaseIndexes(): Promise<void> {
     // ==========================================
     // SESSIONS COLLECTION
     // ==========================================
+    // Drop old incorrect indexes that don't match Session model schema
+    await dropIndexSafely('sessions', 'session_token_unique'); // Was using 'sessionToken', should be 'token'
+    await dropIndexSafely('sessions', 'device_sessions'); // Was using 'deviceId', should be 'deviceName'
+    await dropIndexSafely('sessions', 'user_active_sessions'); // Was using 'lastActivity', should be 'lastActive'
+    await dropIndexSafely('sessions', 'session_inactivity_ttl'); // Was using 'lastActivity', should use 'expiresAt'
+
+    // Create correct indexes matching Session.ts schema
     await createIndexesSafely('sessions', [
-      { key: { userId: 1, isActive: 1, lastActivity: -1 }, name: 'user_active_sessions' },
-      { key: { deviceId: 1 }, name: 'device_sessions' },
-      { key: { sessionToken: 1 }, unique: true, name: 'session_token_unique' },
-      // TTL index for inactive sessions (30 days)
-      { key: { lastActivity: 1 }, expireAfterSeconds: 2592000, name: 'session_inactivity_ttl' },
+      { key: { userId: 1, isActive: 1, lastActive: -1 }, name: 'user_active_sessions_corrected' },
+      { key: { token: 1 }, unique: true, name: 'token_unique' },
+      // TTL index handled by Session schema itself with expireAfterSeconds on expiresAt
     ]);
 
     // ==========================================
