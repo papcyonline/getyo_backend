@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import mongoose from 'mongoose';
 import Session, { ISession } from '../models/Session';
 import GeolocationService from './GeolocationService';
 
@@ -102,12 +101,9 @@ class SessionService {
       // Calculate expiry date
       const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
 
-      // Convert userId string to ObjectId
-      const userObjectId = new mongoose.Types.ObjectId(userId);
-
-      // Create session
+      // Create session - Mongoose will automatically convert userId string to ObjectId
       const session = new Session({
-        userId: userObjectId,
+        userId,
         token: hashedToken,
         deviceName,
         deviceType,
